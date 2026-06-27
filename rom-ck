@@ -164,8 +164,14 @@ def process_single_file(file_path, db, slow_mode):
         is_good = False
 
     lines = [f"File: {file_name}"]
+    
+    # Explicit Header/Headerless Master Log Reporting
     if header_offset > 0:
+        lines.append(f"  Header Status: Headered")
         lines.append(f"  Header Skipped: {header_offset} bytes")
+    else:
+        lines.append(f"  Header Status: Headerless")
+        
     lines.extend([
         f"  SHA-1:  {sha1}",
         f"  MD5:    {md5}",
@@ -202,9 +208,7 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None):
     bad_dumps = 0
     report_lines = []
 
-    # If max_threads is specified (either a custom int or custom None for CPU max auto-scaling)
     if max_threads is not None and total_files > 1:
-        # If thread counts were set to 0 or left dynamic via raw flag, pass None to ThreadPoolExecutor to auto-scale
         num_workers = None if max_threads == 0 else max_threads
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
             futures = {executor.submit(process_single_file, fp, db, slow_mode): fp for fp in files_to_scan}
@@ -247,14 +251,12 @@ if __name__ == "__main__":
     roms_input = sys.argv[2]
     slow_flag = "--slow" in sys.argv
     
-    # Custom Argument Parser to check for '--thread <number>' vs just '--thread'
-    threads = None # None means completely single threaded sequential
+    threads = None 
     if "--thread" in sys.argv:
         idx = sys.argv.index("--thread")
-        # Check if there is an argument following '--thread' and if it's a digit
         if idx + 1 < len(sys.argv) and sys.argv[idx + 1].isdigit():
             threads = int(sys.argv[idx + 1])
         else:
-            threads = 0 # 0 signals "use maximum system capacity threads"
+            threads = 0 
 
     verify_roms(dat_input, roms_input, slow_mode=slow_flag, max_threads=threads)
