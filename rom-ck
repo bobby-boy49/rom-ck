@@ -169,7 +169,7 @@ def verify_rom(file_path, relative_path):
 
 
 # --- Execution and Multi-Threading Manager ---
-report_path = os.path.join(roms_root_dir, "recursive_rom_verification_report.txt")
+report_path = os.path.join(roms_root_dir, "rom_verification_report.txt")
 mode_str = "DEEP AUDIT (SHA-256 PRIMARY)" if slow_mode else "FAST MODE (SHA-1)"
 report_lines = [f"Recursive ROM Verification Report [{mode_str}] for: {roms_root_dir}\n", "="*70 + "\n"]
 
