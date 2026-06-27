@@ -3,6 +3,7 @@ import os
 import sys
 import hashlib
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ==============================================================================
 # MASTER VALID EXTENSIONS LIST
@@ -35,10 +36,6 @@ VALID_EXTENSIONS = (
 )
 
 def parse_dats(dat_path):
-    """
-    Parses Logiqx standard XML DAT files into lookup dictionaries.
-    Supports single .dat paths or a directory folder full of them.
-    """
     db = {'sha256': {}, 'sha1': {}, 'md5': {}}
     dat_files = []
 
@@ -58,7 +55,6 @@ def parse_dats(dat_path):
         try:
             tree = ET.parse(dat)
             root = tree.getroot()
-            # Handle both standard XML architectures (<game> or <machine>)
             for game in root.findall('.//game') + root.findall('.//machine'):
                 game_name = game.get('name')
                 for rom in game.findall('rom'):
@@ -75,52 +71,37 @@ def parse_dats(dat_path):
     return db
 
 def get_header_offset(file_path, ext, file_size):
-    """
-    Calculates exact dynamic header offset streams to strip data blocks.
-    Bypasses emulator additions (iNES, SMC, LyNX, A78) and legacy copiers.
-    """
     header_offset = 0
 
-    # 1. iNES / NES Headers
     if ext == '.nes' and file_size > 16:
         with open(file_path, 'rb') as f:
             magic = f.read(4)
             if magic == b'NES\x1a':
                 header_offset = 16
 
-    # 2. Super Nintendo Copier (Super Magicom) Headers
     elif ext == '.smc':
         if file_size % 0x2000 == 512:
             header_offset = 512
 
-    # 3. Atari 7800 ProSystem Headers
     elif ext == '.a78' and file_size > 128:
         with open(file_path, 'rb') as f:
             magic = f.read(4)
             if magic == b'ATARI':
                 header_offset = 128
 
-    # 4. Atari Lynx Handy Headers
     elif ext == '.lnx' and file_size > 64:
         with open(file_path, 'rb') as f:
             magic = f.read(4)
             if magic == b'LYNX':
                 header_offset = 64
 
-    # 5. Sega Master System / Game Gear 512-Byte Legacy Copier Headers
     elif ext in ['.sms', '.gg']:
-        # True Sega 8-bit dumps scale evenly into 16KB banks (0x4000).
-        # A trailing remainder of 512 signals a non-standard physical backup block.
         if file_size % 0x4000 == 512:
             header_offset = 512
 
     return header_offset
 
 def hash_rom(file_path, header_offset):
-    """
-    Generates cryptographic checksum arrays ignoring physical overhead sectors.
-    Uses sequential chunk loading to easily accommodate heavy DVD ISO files.
-    """
     sha256_hash = hashlib.sha256()
     sha1_hash = hashlib.sha1()
     md5_hash = hashlib.md5()
@@ -137,68 +118,90 @@ def hash_rom(file_path, header_offset):
 
     return sha256_hash.hexdigest(), sha1_hash.hexdigest(), md5_hash.hexdigest()
 
-def verify_roms(dat_path, roms_dir, slow_mode=False):
+def process_single_file(file_path, db, slow_mode):
+    file_name = os.path.basename(file_path)
+    ext = os.path.splitext(file_name)[1].lower()
+    file_size = os.path.getsize(file_path)
+
+    header_offset = get_header_offset(file_path, ext, file_size)
+    sha256, sha1, md5 = hash_rom(file_path, header_offset)
+
+    matched_game = None
+    method = ""
+
+    if sha256 in db['sha256']:
+        matched_game = db['sha256'][sha256]
+        method = "SHA-256"
+    elif slow_mode:
+        if sha1 in db['sha1']:
+            matched_game = db['sha1'][sha1]
+            method = "SHA-1"
+        elif md5 in db['md5']:
+            matched_game = db['md5'][md5]
+            method = "MD5"
+
+    if matched_game:
+        result = f"[GOOD DUMP] Matches: {matched_game} via {method}"
+        is_good = True
+    else:
+        result = "[BAD/UNKNOWN DUMP]"
+        is_good = False
+
+    lines = [f"File: {file_name}"]
+    if header_offset > 0:
+        lines.append(f"  Header Skipped: {header_offset} bytes")
+    lines.extend([
+        f"  SHA-1:  {sha1}",
+        f"  MD5:    {md5}",
+        f"  SHA-256:{sha256}",
+        f"  RESULT: {result}",
+        "-" * 50
+    ])
+    
+    return file_name, is_good, "\n".join(lines)
+
+def verify_roms(dat_path, roms_dir, slow_mode=False, use_threading=False):
     print("Loading database (Deep Audit [SHA-256 Anchor] mode)...")
     db = parse_dats(dat_path)
 
     print(f"Recursively scanning: {roms_dir}")
+    if use_threading:
+        print("Threading enabled: Processing files in parallel via ThreadPoolExecutor.")
+    else:
+        print("Threading disabled: Processing sequentially (Safe for SD Cards).")
     print("=" * 50)
 
-    good_dumps = 0
-    bad_dumps = 0
-    report_lines = []
-
-    # Compile files matching valid system layouts
     files_to_scan = []
     for root, _, files in os.walk(roms_dir):
         for file in files:
             if file.lower().endswith(VALID_EXTENSIONS):
                 files_to_scan.append(os.path.join(root, file))
 
-    for idx, file_path in enumerate(files_to_scan, 1):
-        file_name = os.path.basename(file_path)
-        ext = os.path.splitext(file_name)[1].lower()
-        file_size = os.path.getsize(file_path)
+    total_files = len(files_to_scan)
+    good_dumps = 0
+    bad_dumps = 0
+    report_lines = []
 
-        print(f"[{idx}/{len(files_to_scan)}] Scanning: {file_name}")
+    if use_threading and total_files > 1:
+        with ThreadPoolExecutor() as executor:
+            futures = {executor.submit(process_single_file, fp, db, slow_mode): fp for fp in files_to_scan}
+            
+            for idx, future in enumerate(as_completed(futures), 1):
+                file_name, is_good, log_block = future.result()
+                print(f"[{idx}/{total_files}] Processed: {file_name}")
+                if is_good: good_dumps += 1
+                else: bad_dumps += 1
+                report_lines.append(log_block)
+    else:
+        # Default single-threaded path
+        for idx, file_path in enumerate(files_to_scan, 1):
+            file_name, is_good, log_block = process_single_file(file_path, db, slow_mode)
+            print(f"[{idx}/{total_files}] Scanning: {file_name}")
+            if is_good: good_dumps += 1
+            else: bad_dumps += 1
+            report_lines.append(log_block)
 
-        header_offset = get_header_offset(file_path, ext, file_size)
-        sha256, sha1, md5 = hash_rom(file_path, header_offset)
-
-        # Audit logic cross-checking hashes sequentially 
-        matched_game = None
-        method = ""
-
-        if sha256 in db['sha256']:
-            matched_game = db['sha256'][sha256]
-            method = "SHA-256"
-        elif slow_mode:
-            if sha1 in db['sha1']:
-                matched_game = db['sha1'][sha1]
-                method = "SHA-1"
-            elif md5 in db['md5']:
-                matched_game = db['md5'][md5]
-                method = "MD5"
-
-        if matched_game:
-            result = f"[GOOD DUMP] Matches: {matched_game} via {method}"
-            good_dumps += 1
-        else:
-            result = "[BAD/UNKNOWN DUMP]"
-            bad_dumps += 1
-
-        # Format individual entries for the file output
-        report_lines.append(f"File: {file_name}")
-        if header_offset > 0:
-            report_lines.append(f"  Header Skipped: {header_offset} bytes")
-        report_lines.append(f"  SHA-1:  {sha1}")
-        report_lines.append(f"  MD5:    {md5}")
-        report_lines.append(f"  SHA-256:{sha256}")
-        report_lines.append(f"  RESULT: {result}")
-        report_lines.append("-" * 50)
-
-    # Compile the final evaluation layout
-    report_path = os.path.join(roms_dir, "rom_verification_report.txt")
+    report_path = os.path.join(roms_dir, "recursive_rom_verification_report.txt")
     with open(report_path, "w") as f:
         f.write(f"Recursive ROM Verification Report for: {roms_dir}\n")
         f.write("=" * 70 + "\n")
@@ -215,11 +218,12 @@ def verify_roms(dat_path, roms_dir, slow_mode=False):
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Usage: rom-ck <path_to_dat_or_folder> <path_to_roms_dir> [--slow]")
+        print("Usage: rom-ck <path_to_dat_or_folder> <path_to_roms_dir> [--slow] [--thread]")
         sys.exit(1)
 
     dat_input = sys.argv[1]
     roms_input = sys.argv[2]
     slow_flag = "--slow" in sys.argv
+    thread_flag = "--thread" in sys.argv
 
-    verify_roms(dat_input, roms_input, slow_mode=slow_flag)
+    verify_roms(dat_input, roms_input, slow_mode=slow_flag, use_threading=thread_flag)
