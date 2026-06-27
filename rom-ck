@@ -1,0 +1,218 @@
+#!/usr/bin/env python3
+import os
+import sys
+import hashlib
+import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+VALID_EXTENSIONS = (
+    '.z64', '.v64', '.n64', '.rom', # Nintendo 64
+    '.gba', '.gbc', '.gb',          # Game Boy family
+    '.nes', '.sfc', '.smc',          # NES / SNES
+    '.md', '.bin', '.gen',           # Genesis / Mega Drive
+    '.nds', '.3ds', '.pbp', '.iso'   # Disc/DS formats
+)
+
+# Parse command line options
+slow_mode = '--slow' in sys.argv
+use_threading = '--threads' in sys.argv
+
+# Determine max workers from arguments
+max_workers = None
+if use_threading:
+    try:
+        idx = sys.argv.index('--threads')
+        if idx + 1 < len(sys.argv) and sys.argv[idx + 1].isdigit():
+            max_workers = int(sys.argv[idx + 1])
+    except ValueError:
+        pass
+
+# Clean up args to extract positional paths safely
+args = [a for a in sys.argv if a not in ('--slow', '--threads')]
+if max_workers is not None:
+    args = [a for a in args if a != str(max_workers)]
+
+if len(args) < 3:
+    print("Usage: rom-ck <path_to_dat_or_folder> <path_to_roms_root> [--slow] [--threads [num_workers]]")
+    print("  [--slow]                  Optional flag to use SHA-256 as anchor and cross-verify hashes.")
+    print("  [--threads [workers]]     Optional flag to enable multi-threading. Optionally specify a worker limit.")
+    sys.exit(1)
+
+dat_input, roms_root_dir = args[1], args[2]
+
+# The database maps a hash string to a LIST of matching game dictionary metadata entries
+dat_hashes = {}
+
+def parse_dat(file_path):
+    try:
+        tree = ET.parse(file_path)
+        root = tree.getroot()
+        for game in root.findall('game'):
+            game_name = game.get('name')
+            for rom in game.findall('rom'):
+                md5 = rom.get('md5', '').lower()
+                sha1 = rom.get('sha1', '').lower()
+                sha256 = rom.get('sha256', '').lower()
+
+                rom_meta = {"name": game_name, "md5": md5, "sha1": sha1, "sha256": sha256}
+
+                # In slow mode, anchor primarily on SHA-256 to eliminate collisions
+                if slow_mode:
+                    if sha256:
+                        dat_hashes.setdefault(sha256, []).append(rom_meta)
+                    elif sha1:  # Defensive fallback if a community DAT lacks SHA-256 entries
+                        dat_hashes.setdefault(sha1, []).append(rom_meta)
+                else:
+                    # Fast mode anchors entirely on SHA-1
+                    if sha1:
+                        dat_hashes.setdefault(sha1, []).append(rom_meta)
+    except Exception as e:
+        print(f"Error parsing DAT {file_path}: {e}")
+
+print(f"Loading database ({'Deep Audit [SHA-256 Anchor]' if slow_mode else 'Fast Mode [SHA-1 Anchor]'} mode)...")
+if os.path.isdir(dat_input):
+    # Recursively find all .dat files inside nested subfolders
+    for root, dirs, files in os.walk(dat_input):
+        for f in files:
+            if f.lower().endswith('.dat'):
+                parse_dat(os.path.join(root, f))
+else:
+    parse_dat(dat_input)
+
+
+def verify_rom(file_path, relative_path):
+    try:
+        h_sha1 = hashlib.sha1()
+        h_md5 = hashlib.md5() if slow_mode else None
+        h_sha256 = hashlib.sha256() if slow_mode else None
+
+        # Read in chunks to prevent memory choking and speed up MicroSD streaming
+        with open(file_path, "rb") as f:
+            ext = file_path.lower()
+
+            # --- System-Specific Emulator Header Handling ---
+            if ext.endswith('.nes'):
+                f.seek(16)   # Skip 16-byte iNES header
+            elif ext.endswith('.a78'):
+                f.seek(128)  # Skip 128-byte Atari 7800 header
+            elif ext.endswith('.lnx'):
+                f.seek(64)   # Skip 64-byte Atari Lynx header
+            elif ext.endswith('.smc'):
+                # Dynamically check if the .smc file has a 512-byte copier header
+                file_size = os.path.getsize(file_path)
+                if file_size % 1024 == 512:
+                    f.seek(512) # Skip 512-byte SNES header
+
+            for chunk in iter(lambda: f.read(65536), b""):
+                h_sha1.update(chunk)
+                if slow_mode:
+                    h_md5.update(chunk)
+                    h_sha256.update(chunk)
+
+        f_sha1 = h_sha1.hexdigest()
+        f_md5 = h_md5.hexdigest() if slow_mode else ""
+        f_sha256 = h_sha256.hexdigest() if slow_mode else ""
+
+        # Step 1: Query the database with the primary hash anchor
+        primary_key = f_sha256 if slow_mode else f_sha1
+        potential_matches = dat_hashes.get(primary_key, [])
+
+        # Deep audit secondary fallback check: if SHA-256 query missed, check SHA-1 fallback list
+        if slow_mode and not potential_matches:
+            potential_matches = dat_hashes.get(f_sha1, [])
+
+        matched_game = None
+        match_method = "SHA-256" if slow_mode else "SHA-1"
+
+        if potential_matches:
+            # Case A: Pure clean unique match, or running fast sequential mode
+            if len(potential_matches) == 1 or not slow_mode:
+                matched_game = potential_matches[0]["name"]
+            else:
+                # Case B: Multiple entries share this anchor hash! Cross-reference other metadata values.
+                strict_matches = []
+                for meta in potential_matches:
+                    md5_match = (not meta["md5"] or meta["md5"] == f_md5)
+                    sha1_match = (not meta["sha1"] or meta["sha1"] == f_sha1)
+                    sha256_match = (not meta["sha256"] or meta["sha256"] == f_sha256)
+
+                    if md5_match and sha1_match and sha256_match:
+                        strict_matches.append(meta)
+
+                if strict_matches:
+                    matched_game = strict_matches[0]["name"]
+                    match_method = "Strict Multi-Hash Validation (SHA256+SHA1+MD5)"
+                else:
+                    # Inconclusive strict resolution fallback
+                    matched_game = potential_matches[0]["name"]
+                    match_method = f"{'SHA-256' if slow_mode else 'SHA-1'} (Ambiguous Overlap Match)"
+
+        # Prepare log entry lines
+        log_msg = f"File: {relative_path}\n"
+        log_msg += f"  SHA-1:  {f_sha1}\n"
+        if slow_mode:
+            log_msg += f"  MD5:    {f_md5}\n"
+            log_msg += f"  SHA-256:{f_sha256}\n"
+
+        if matched_game:
+            log_msg += f"  RESULT: [GOOD DUMP] Matches: {matched_game} via {match_method}\n"
+            is_good = True
+        else:
+            log_msg += f"  RESULT: [BAD/UNKNOWN DUMP]\n"
+            is_good = False
+
+        log_msg += "-"*50 + "\n"
+        return is_good, log_msg, relative_path
+
+    except Exception as e:
+        return None, f"Error reading file {relative_path}: {e}\n", relative_path
+
+
+# --- Execution and Multi-Threading Manager ---
+report_path = os.path.join(roms_root_dir, "recursive_rom_verification_report.txt")
+mode_str = "DEEP AUDIT (SHA-256 PRIMARY)" if slow_mode else "FAST MODE (SHA-1)"
+report_lines = [f"Recursive ROM Verification Report [{mode_str}] for: {roms_root_dir}\n", "="*70 + "\n"]
+
+good_count = 0
+bad_count = 0
+
+print(f"Recursively scanning: {roms_root_dir}\n" + "="*50)
+
+# Build tasks
+rom_tasks = []
+for root_dir, dirs, files in os.walk(roms_root_dir):
+    for file in sorted(files):
+        if file.lower().endswith(VALID_EXTENSIONS):
+            f_path = os.path.join(root_dir, file)
+            rel_path = os.path.relpath(f_path, roms_root_dir)
+            rom_tasks.append((f_path, rel_path))
+
+if use_threading:
+    worker_desc = f"Auto ({os.cpu_count()} max)" if max_workers is None else f"{max_workers} threads"
+    print(f"Threading enabled: Using {worker_desc} workers.\n" + "-"*50)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(verify_rom, fp, rp): rp for fp, rp in rom_tasks}
+        for future in as_completed(futures):
+            is_good, log_msg, rel_path = future.result()
+            print(f"Scanned: {rel_path}")
+            report_lines.append(log_msg)
+            if is_good is True: good_count += 1
+            elif is_good is False: bad_count += 1
+else:
+    print("Threading disabled: Processing sequentially.\n" + "-"*50)
+    for fp, rp in rom_tasks:
+        print(f"Scanning: {rp}")
+        is_good, log_msg, _ = verify_rom(fp, rp)
+        report_lines.append(log_msg)
+        if is_good is True: good_count += 1
+        elif is_good is False: bad_count += 1
+
+summary = f"\nVerification Summary:\nTotal Good Dumps: {good_count}\nTotal Bad/Unknown Dumps: {bad_count}\n"
+print("\n" + summary)
+report_lines.append(summary)
+
+with open(report_path, "w") as rf:
+    rf.writelines(report_lines)
+
+print(f"Done! Master report saved to: {report_path}")
