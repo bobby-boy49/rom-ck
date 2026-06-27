@@ -2,6 +2,7 @@
 import os
 import sys
 import hashlib
+import zipfile
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -9,6 +10,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # MASTER VALID EXTENSIONS LIST
 # ==============================================================================
 VALID_EXTENSIONS = (
+    # --- Compression / Archives ---
+    '.zip',                          # Arcade (MAME) / Compressed Cartridges
+    
     # --- Nintendo ---
     '.z64', '.v64', '.n64', '.rom',  # Nintendo 64
     '.gba', '.gbc', '.gb',           # Game Boy, Color, Advance
@@ -61,7 +65,9 @@ def parse_dats(dat_path):
                     sha256 = rom.get('sha256')
                     sha1 = rom.get('sha1')
                     md5 = rom.get('md5')
+                    rom_file_name = rom.get('name') # Specifically useful for individual MAME chips
 
+                    # Track game name variants
                     if sha1:
                         sha1_lower = sha1.lower()
                         if sha1_lower not in db['sha1']: db['sha1'][sha1_lower] = []
@@ -79,36 +85,37 @@ def parse_dats(dat_path):
             continue
     return db
 
-def get_header_offset(file_path, ext, file_size):
+def get_header_offset_from_bytes(magic_4bytes, ext, file_size):
     header_offset = 0
 
     if ext == '.nes' and file_size > 16:
-        with open(file_path, 'rb') as f:
-            magic = f.read(4)
-            if magic == b'NES\x1a':
-                header_offset = 16
+        if magic_4bytes == b'NES\x1a':
+            header_offset = 16
 
     elif ext == '.smc':
         if file_size % 0x2000 == 512:
             header_offset = 512
 
     elif ext == '.a78' and file_size > 128:
-        with open(file_path, 'rb') as f:
-            magic = f.read(4)
-            if magic == b'ATARI':
-                header_offset = 128
+        if magic_4bytes == b'ATARI':
+            header_offset = 128
 
     elif ext == '.lnx' and file_size > 64:
-        with open(file_path, 'rb') as f:
-            magic = f.read(4)
-            if magic == b'LYNX':
-                header_offset = 64
+        if magic_4bytes == b'LYNX':
+            header_offset = 64
 
     elif ext in ['.sms', '.gg']:
         if file_size % 0x4000 == 512:
             header_offset = 512
 
     return header_offset
+
+def get_header_offset(file_path, ext, file_size):
+    if ext in ['.nes', '.a78', '.lnx']:
+        with open(file_path, 'rb') as f:
+            magic = f.read(4)
+        return get_header_offset_from_bytes(magic, ext, file_size)
+    return get_header_offset_from_bytes(b'', ext, file_size)
 
 def hash_rom(file_path, header_offset):
     sha256_hash = hashlib.sha256()
@@ -127,14 +134,25 @@ def hash_rom(file_path, header_offset):
 
     return sha256_hash.hexdigest(), sha1_hash.hexdigest(), md5_hash.hexdigest()
 
-def process_single_file(file_path, db, slow_mode):
-    file_name = os.path.basename(file_path)
-    ext = os.path.splitext(file_name)[1].lower()
-    file_size = os.path.getsize(file_path)
+def hash_zip_entry(zf, zip_info, header_offset):
+    sha256_hash = hashlib.sha256()
+    sha1_hash = hashlib.sha1()
+    md5_hash = hashlib.md5()
 
-    header_offset = get_header_offset(file_path, ext, file_size)
-    sha256, sha1, md5 = hash_rom(file_path, header_offset)
+    with zf.open(zip_info.filename, 'r') as f:
+        if header_offset > 0:
+            f.read(header_offset)  # Skip header bytes in the memory stream
+        while True:
+            chunk = f.read(65536)
+            if not chunk:
+                break
+            sha256_hash.update(chunk)
+            sha1_hash.update(chunk)
+            md5_hash.update(chunk)
 
+    return sha256_hash.hexdigest(), sha1_hash.hexdigest(), md5_hash.hexdigest()
+
+def audit_hashes(sha256, sha1, md5, db, slow_mode):
     matched_games = []
     method = ""
 
@@ -153,34 +171,111 @@ def process_single_file(file_path, db, slow_mode):
             matched_games = db['md5'][md5]
             method = "MD5 (Slow Fallback)"
 
-    if matched_games:
-        if len(matched_games) > 1:
-            result = f"[GOOD DUMP] Matches multiple variants: {', '.join(matched_games)} via {method}"
-        else:
-            result = f"[GOOD DUMP] Matches: {matched_games[0]} via {method}"
-        is_good = True
-    else:
-        result = "[BAD/UNKNOWN DUMP]"
-        is_good = False
+    return matched_games, method
 
-    lines = [f"File: {file_name}"]
+def process_single_file(file_path, db, slow_mode):
+    file_name = os.path.basename(file_path)
+    ext = os.path.splitext(file_name)[1].lower()
     
-    # Explicit Header/Headerless Master Log Reporting
-    if header_offset > 0:
-        lines.append(f"  Header Status: Headered")
-        lines.append(f"  Header Skipped: {header_offset} bytes")
-    else:
-        lines.append(f"  Header Status: Headerless")
+    # --- ZIP FILE PARSING LIFECYCLE ---
+    if ext == '.zip':
+        lines = [f"File: {file_name} [Zip Archive]"]
+        total_entries = 0
+        good_entries = 0
         
-    lines.extend([
-        f"  SHA-1:  {sha1}",
-        f"  MD5:    {md5}",
-        f"  SHA-256:{sha256}",
-        f"  RESULT: {result}",
-        "-" * 50
-    ])
-    
-    return file_name, is_good, "\n".join(lines)
+        try:
+            with zipfile.ZipFile(file_path, 'r') as zf:
+                # Filter out directories
+                zip_infos = [z for z in zf.infolist() if not z.is_dir()]
+                total_entries = len(zip_infos)
+                
+                if total_entries == 0:
+                    lines.append("  Result: Empty Zip Archive")
+                    return file_name, False, "\n".join(lines) + "\n" + "-" * 50
+                
+                for z_info in zip_infos:
+                    inner_ext = os.path.splitext(z_info.filename)[1].lower()
+                    
+                    # Inspect inner file header layout safely from memory stream
+                    inner_header_offset = 0
+                    if inner_ext in ['.nes', '.a78', '.lnx']:
+                        with zf.open(z_info.filename, 'r') as f:
+                            magic = f.read(4)
+                        inner_header_offset = get_header_offset_from_bytes(magic, inner_ext, z_info.file_size)
+                    else:
+                        inner_header_offset = get_header_offset_from_bytes(b'', inner_ext, z_info.file_size)
+                    
+                    # Compute hashes for internal entry
+                    z_sha256, z_sha1, z_md5 = hash_zip_entry(zf, z_info, inner_header_offset)
+                    matched_games, method = audit_hashes(z_sha256, z_sha1, z_md5, db, slow_mode)
+                    
+                    entry_line = f"  -> Inside Zip: {z_info.filename}"
+                    if inner_header_offset > 0:
+                        entry_line += f" (Headered, Skipped {inner_header_offset} bytes)"
+                    else:
+                        entry_line += " (Headerless)"
+                    lines.append(entry_line)
+                    lines.append(f"     SHA-1:  {z_sha1}")
+                    lines.append(f"     MD5:    {z_md5}")
+                    lines.append(f"     SHA-256:{z_sha256}")
+                    
+                    if matched_games:
+                        good_entries += 1
+                        if len(matched_games) > 1:
+                            lines.append(f"     RESULT: [GOOD MATCH] Variants: {', '.join(matched_games)} via {method}")
+                        else:
+                            lines.append(f"     RESULT: [GOOD MATCH] Matches: {matched_games[0]} via {method}")
+                    else:
+                        lines.append(f"     RESULT: [UNKNOWN/BAD INNER FILE]")
+                    lines.append("     " + "." * 30)
+                    
+        except zipfile.BadZipFile:
+            lines.append("  RESULT: [CORRUPT ZIP ARCHIVE]")
+            return file_name, False, "\n".join(lines) + "\n" + "-" * 50
+
+        # An archive is verified if all valid binary entries inside it successfully match components in the DAT
+        is_good = (good_entries == total_entries and total_entries > 0)
+        if is_good:
+            lines.append(f"  FINAL SUMMARY RESULT: [GOOD DUMP] All {good_entries}/{total_entries} sub-files authenticated.")
+        else:
+            lines.append(f"  FINAL SUMMARY RESULT: [BAD/UNKNOWN DUMP] Found {total_entries - good_entries} unmapped sub-files.")
+        lines.append("-" * 50)
+        return file_name, is_good, "\n".join(lines)
+
+    # --- STANDARD UNCOMPRESSED FILE LIFECYCLE ---
+    else:
+        file_size = os.path.getsize(file_path)
+        header_offset = get_header_offset(file_path, ext, file_size)
+        sha256, sha1, md5 = hash_rom(file_path, header_offset)
+
+        matched_games, method = audit_hashes(sha256, sha1, md5, db, slow_mode)
+
+        if matched_games:
+            if len(matched_games) > 1:
+                result = f"[GOOD DUMP] Matches multiple variants: {', '.join(matched_games)} via {method}"
+            else:
+                result = f"[GOOD DUMP] Matches: {matched_games[0]} via {method}"
+            is_good = True
+        else:
+            result = "[BAD/UNKNOWN DUMP]"
+            is_good = False
+
+        lines = [f"File: {file_name}"]
+        if header_offset > 0:
+            lines.append(f"  Header Status: Headered")
+            lines.append(f"  Header Skipped: {header_offset} bytes")
+        else:
+            lines.append(f"  Header Status: Headerless")
+            
+        lines.extend([
+            f"  SHA-1:  {sha1}",
+            f"  MD5:    {md5}",
+            f"  SHA-256:{sha256}",
+            f"  RESULT: {result}",
+            "-" * 50
+        ])
+        
+        return file_name, is_good, "\n".join(lines)
 
 def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None):
     if slow_mode:
@@ -192,7 +287,10 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None):
 
     print(f"Recursively scanning: {roms_dir}")
     if max_threads is not None:
-        print(f"Threading enabled: Processing files in parallel utilizing {max_threads} worker thread(s).")
+        if max_threads == 0:
+            print("Threading enabled: Processing files in parallel utilizing maximum hardware capacity.")
+        else:
+            print(f"Threading enabled: Processing files in parallel utilizing {max_threads} worker thread(s).")
     else:
         print("Threading disabled: Processing sequentially (Safe for SD Cards).")
     print("=" * 50)
