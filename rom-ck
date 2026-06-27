@@ -62,7 +62,6 @@ def parse_dats(dat_path):
                     sha1 = rom.get('sha1')
                     md5 = rom.get('md5')
 
-                    # Store in lists to properly track variants/hash collisions
                     if sha1:
                         sha1_lower = sha1.lower()
                         if sha1_lower not in db['sha1']: db['sha1'][sha1_lower] = []
@@ -139,30 +138,22 @@ def process_single_file(file_path, db, slow_mode):
     matched_games = []
     method = ""
 
-    # ==========================================================================
-    # AUDIT LOGIC (SHA-1 Fast Default vs Dynamic Cascading Fallback Slow Mode)
-    # ==========================================================================
     if not slow_mode:
-        # Fast Mode: Only anchor and verify via SHA-1
         if sha1 in db['sha1']:
             matched_games = db['sha1'][sha1]
             method = "SHA-1"
     else:
-        # Slow Mode: Look up SHA-256 first
         if sha256 in db['sha256']:
             matched_games = db['sha256'][sha256]
             method = "SHA-256"
-        # Slow Fallback 1: Fall back to SHA-1 if SHA-256 is missing in the DAT entries
         elif sha1 in db['sha1']:
             matched_games = db['sha1'][sha1]
             method = "SHA-1 (Slow Fallback)"
-        # Slow Fallback 2: Fall back to MD5 if both SHA options are missing in the DAT
         elif md5 in db['md5']:
             matched_games = db['md5'][md5]
             method = "MD5 (Slow Fallback)"
 
     if matched_games:
-        # Handle duplicate hash hits or regional clone variants listed under a shared dump
         if len(matched_games) > 1:
             result = f"[GOOD DUMP] Matches multiple variants: {', '.join(matched_games)} via {method}"
         else:
@@ -185,7 +176,7 @@ def process_single_file(file_path, db, slow_mode):
     
     return file_name, is_good, "\n".join(lines)
 
-def verify_roms(dat_path, roms_dir, slow_mode=False, use_threading=False):
+def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None):
     if slow_mode:
         print("Loading database (Slow Mode: Deep Audit [SHA-256 Anchor -> SHA-1/MD5 Fallbacks])...")
     else:
@@ -194,8 +185,8 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, use_threading=False):
     db = parse_dats(dat_path)
 
     print(f"Recursively scanning: {roms_dir}")
-    if use_threading:
-        print("Threading enabled: Processing files in parallel")
+    if max_threads is not None:
+        print(f"Threading enabled: Processing files in parallel utilizing {max_threads} worker thread(s).")
     else:
         print("Threading disabled: Processing sequentially (Safe for SD Cards).")
     print("=" * 50)
@@ -211,8 +202,11 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, use_threading=False):
     bad_dumps = 0
     report_lines = []
 
-    if use_threading and total_files > 1:
-        with ThreadPoolExecutor() as executor:
+    # If max_threads is specified (either a custom int or custom None for CPU max auto-scaling)
+    if max_threads is not None and total_files > 1:
+        # If thread counts were set to 0 or left dynamic via raw flag, pass None to ThreadPoolExecutor to auto-scale
+        num_workers = None if max_threads == 0 else max_threads
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
             futures = {executor.submit(process_single_file, fp, db, slow_mode): fp for fp in files_to_scan}
             
             for idx, future in enumerate(as_completed(futures), 1):
@@ -246,12 +240,21 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, use_threading=False):
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Usage: rom-ck <path_to_dat_or_folder> <path_to_roms_dir> [--slow] [--thread]")
+        print("Usage: rom-ck <path_to_dat_or_folder> <path_to_roms_dir> [--slow] [--thread [num_threads]]")
         sys.exit(1)
 
     dat_input = sys.argv[1]
     roms_input = sys.argv[2]
     slow_flag = "--slow" in sys.argv
-    thread_flag = "--thread" in sys.argv
+    
+    # Custom Argument Parser to check for '--thread <number>' vs just '--thread'
+    threads = None # None means completely single threaded sequential
+    if "--thread" in sys.argv:
+        idx = sys.argv.index("--thread")
+        # Check if there is an argument following '--thread' and if it's a digit
+        if idx + 1 < len(sys.argv) and sys.argv[idx + 1].isdigit():
+            threads = int(sys.argv[idx + 1])
+        else:
+            threads = 0 # 0 signals "use maximum system capacity threads"
 
-    verify_roms(dat_input, roms_input, slow_mode=slow_flag, use_threading=thread_flag)
+    verify_roms(dat_input, roms_input, slow_mode=slow_flag, max_threads=threads)
