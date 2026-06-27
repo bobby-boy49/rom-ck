@@ -198,7 +198,7 @@ def verify_roms(dat_path, roms_dir, slow_mode=False):
         report_lines.append("-" * 50)
 
     # Compile the final evaluation layout
-    report_path = os.path.join(roms_dir, "recursive_rom_verification_report.txt")
+    report_path = os.path.join(roms_dir, "rom_verification_report.txt")
     with open(report_path, "w") as f:
         f.write(f"Recursive ROM Verification Report for: {roms_dir}\n")
         f.write("=" * 70 + "\n")
