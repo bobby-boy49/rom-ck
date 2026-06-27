@@ -195,7 +195,7 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, use_threading=False):
 
     print(f"Recursively scanning: {roms_dir}")
     if use_threading:
-        print("Threading enabled: Processing files in parallel via ThreadPoolExecutor.")
+        print("Threading enabled: Processing files in parallel")
     else:
         print("Threading disabled: Processing sequentially (Safe for SD Cards).")
     print("=" * 50)
