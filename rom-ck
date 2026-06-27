@@ -229,7 +229,7 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, use_threading=False):
             else: bad_dumps += 1
             report_lines.append(log_block)
 
-    report_path = os.path.join(roms_dir, "recursive_rom_verification_report.txt")
+    report_path = os.path.join(roms_dir, "rom_verification_report.txt")
     with open(report_path, "w") as f:
         f.write(f"Recursive ROM Verification Report for: {roms_dir}\n")
         f.write("=" * 70 + "\n")
