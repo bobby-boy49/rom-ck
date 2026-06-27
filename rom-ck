@@ -62,9 +62,19 @@ def parse_dats(dat_path):
                     sha1 = rom.get('sha1')
                     md5 = rom.get('md5')
 
-                    if sha256: db['sha256'][sha256.lower()] = game_name
-                    if sha1: db['sha1'][sha1.lower()] = game_name
-                    if md5: db['md5'][md5.lower()] = game_name
+                    # Store in lists to properly track variants/hash collisions
+                    if sha1:
+                        sha1_lower = sha1.lower()
+                        if sha1_lower not in db['sha1']: db['sha1'][sha1_lower] = []
+                        db['sha1'][sha1_lower].append(game_name)
+                    if sha256:
+                        sha256_lower = sha256.lower()
+                        if sha256_lower not in db['sha256']: db['sha256'][sha256_lower] = []
+                        db['sha256'][sha256_lower].append(game_name)
+                    if md5:
+                        md5_lower = md5.lower()
+                        if md5_lower not in db['md5']: db['md5'][md5_lower] = []
+                        db['md5'][md5_lower].append(game_name)
         except ET.ParseError as e:
             print(f"Error parsing DAT {dat}: {e}")
             continue
@@ -126,22 +136,37 @@ def process_single_file(file_path, db, slow_mode):
     header_offset = get_header_offset(file_path, ext, file_size)
     sha256, sha1, md5 = hash_rom(file_path, header_offset)
 
-    matched_game = None
+    matched_games = []
     method = ""
 
-    if sha256 in db['sha256']:
-        matched_game = db['sha256'][sha256]
-        method = "SHA-256"
-    elif slow_mode:
+    # ==========================================================================
+    # AUDIT LOGIC (SHA-1 Fast Default vs Dynamic Cascading Fallback Slow Mode)
+    # ==========================================================================
+    if not slow_mode:
+        # Fast Mode: Only anchor and verify via SHA-1
         if sha1 in db['sha1']:
-            matched_game = db['sha1'][sha1]
+            matched_games = db['sha1'][sha1]
             method = "SHA-1"
+    else:
+        # Slow Mode: Look up SHA-256 first
+        if sha256 in db['sha256']:
+            matched_games = db['sha256'][sha256]
+            method = "SHA-256"
+        # Slow Fallback 1: Fall back to SHA-1 if SHA-256 is missing in the DAT entries
+        elif sha1 in db['sha1']:
+            matched_games = db['sha1'][sha1]
+            method = "SHA-1 (Slow Fallback)"
+        # Slow Fallback 2: Fall back to MD5 if both SHA options are missing in the DAT
         elif md5 in db['md5']:
-            matched_game = db['md5'][md5]
-            method = "MD5"
+            matched_games = db['md5'][md5]
+            method = "MD5 (Slow Fallback)"
 
-    if matched_game:
-        result = f"[GOOD DUMP] Matches: {matched_game} via {method}"
+    if matched_games:
+        # Handle duplicate hash hits or regional clone variants listed under a shared dump
+        if len(matched_games) > 1:
+            result = f"[GOOD DUMP] Matches multiple variants: {', '.join(matched_games)} via {method}"
+        else:
+            result = f"[GOOD DUMP] Matches: {matched_games[0]} via {method}"
         is_good = True
     else:
         result = "[BAD/UNKNOWN DUMP]"
@@ -161,7 +186,11 @@ def process_single_file(file_path, db, slow_mode):
     return file_name, is_good, "\n".join(lines)
 
 def verify_roms(dat_path, roms_dir, slow_mode=False, use_threading=False):
-    print("Loading database (Deep Audit [SHA-256 Anchor] mode)...")
+    if slow_mode:
+        print("Loading database (Slow Mode: Deep Audit [SHA-256 Anchor -> SHA-1/MD5 Fallbacks])...")
+    else:
+        print("Loading database (Fast Mode: Sequential [SHA-1 Anchor Only])...")
+        
     db = parse_dats(dat_path)
 
     print(f"Recursively scanning: {roms_dir}")
@@ -193,7 +222,6 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, use_threading=False):
                 else: bad_dumps += 1
                 report_lines.append(log_block)
     else:
-        # Default single-threaded path
         for idx, file_path in enumerate(files_to_scan, 1):
             file_name, is_good, log_block = process_single_file(file_path, db, slow_mode)
             print(f"[{idx}/{total_files}] Scanning: {file_name}")
