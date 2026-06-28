@@ -57,7 +57,6 @@ def parse_dats(dat_path):
 
     for dat in dat_files:
         try:
-            # MEMORY FIX: Use streaming iterparse context manager to loop elements line-by-line
             context = ET.iterparse(dat, events=('start', 'end'))
             context = iter(context)
             event, root = next(context)
@@ -75,8 +74,6 @@ def parse_dats(dat_path):
                         md5 = elem.get('md5')
                         rom_file_name = elem.get('name')
 
-                        # Memory tuning: Only cache internal chip names if they differ from the game title 
-                        # (Typical for MAME). Otherwise, cache the raw game string to preserve heap space.
                         if rom_file_name and rom_file_name.lower() != f"{current_game.lower()}.nes" and \
                            rom_file_name.lower() != f"{current_game.lower()}.sfc" and \
                            rom_file_name.lower() != f"{current_game.lower()}.bin":
@@ -97,7 +94,6 @@ def parse_dats(dat_path):
                             if md5_lower not in db['md5']: db['md5'][md5_lower] = []
                             db['md5'][md5_lower].append(map_value)
                     
-                    # Wipe the handled element entirely out of RAM
                     if elem.tag in ('rom', 'game', 'machine'):
                         root.clear()
                         
@@ -258,7 +254,15 @@ def process_single_file(file_path, db, slow_mode):
                                     matches_display.append(g_name)
                             else:
                                 matches_display.append(entry)
-                        lines.append(f"     RESULT: [GOOD MATCH] Variants: {', '.join(matches_display)} via {method}")
+                        
+                        # BIOS SUMMARY TRUNCATION CAP: Keep shared chip lines short
+                        if len(matches_display) > 5:
+                            truncated_count = len(matches_display) - 5
+                            display_str = ", ".join(matches_display[:5]) + f" ... and {truncated_count} other system variants"
+                        else:
+                            display_str = ", ".join(matches_display)
+
+                        lines.append(f"     RESULT: [GOOD MATCH] Variants: {display_str} via {method}")
                     else:
                         lines.append(f"     RESULT: [UNKNOWN/BAD INNER FILE]")
                     lines.append("     " + "." * 30)
@@ -319,7 +323,15 @@ def process_single_file(file_path, db, slow_mode):
                             matches_display.append(g_name)
                     else:
                         matches_display.append(entry)
-                result = f"[GOOD DUMP] Matches: {', '.join(matches_display)} via {method}"
+                
+                # BIOS SUMMARY TRUNCATION CAP: Keep shared chip lines short
+                if len(matches_display) > 5:
+                    truncated_count = len(matches_display) - 5
+                    display_str = ", ".join(matches_display[:5]) + f" ... and {truncated_count} other system variants"
+                else:
+                    display_str = ", ".join(matches_display)
+
+                result = f"[GOOD DUMP] Matches: {display_str} via {method}"
             is_good = True
         else:
             result = "[BAD/UNKNOWN DUMP]"
