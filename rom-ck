@@ -241,7 +241,9 @@ def process_single_file(file_path, db, slow_mode):
                             if isinstance(entry, tuple):
                                 g_name, r_name = entry
                                 if r_name and r_name.lower() == inner_base_name.lower():
-                                    matches_display.append(f"{g_name} [Chip Match: {r_name}]")
+                                    # Use context-aware tags inside archives as well
+                                    tag = "[Chip Match:" if inner_ext in ('.bin', '.rom', '.data') else "[Exact File Match:"
+                                    matches_display.append(f"{g_name} {tag} {r_name}]")
                                 else:
                                     matches_display.append(g_name)
                             else:
@@ -271,13 +273,16 @@ def process_single_file(file_path, db, slow_mode):
 
         matched_entries, method = audit_hashes(sha256, sha1, md5, db, slow_mode)
 
+        # Dynamic label adjustment based on target file extensions
+        match_tag = "[Extracted Chip Match:" if ext in ('.bin', '.rom', '.data') else "[Exact File Name Match:"
+
         if matched_entries:
             if len(matched_entries) == 1:
                 entry = matched_entries[0]
                 if isinstance(entry, tuple):
                     g_name, r_name = entry
                     if r_name and r_name.lower() == file_name.lower():
-                        result = f"[GOOD DUMP] Matches: {g_name} [Extracted Chip Match: {r_name}] via {method}"
+                        result = f"[GOOD DUMP] Matches: {g_name} {match_tag} {r_name}] via {method}"
                     else:
                         result = f"[GOOD DUMP] Matches: {g_name} via {method}"
                 else:
@@ -288,7 +293,7 @@ def process_single_file(file_path, db, slow_mode):
                     if isinstance(entry, tuple):
                         g_name, r_name = entry
                         if r_name and r_name.lower() == file_name.lower():
-                            matches_display.append(f"{g_name} [Extracted Chip Match: {r_name}]")
+                            matches_display.append(f"{g_name} {match_tag} {r_name}]")
                         else:
                             matches_display.append(g_name)
                     else:
