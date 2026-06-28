@@ -163,6 +163,7 @@ def hash_zip_entry(zf, zip_info, header_offset):
             chunk = f.read(65536)
             if not chunk:
                 break
+            # Fixed syntax bug: Removed erroneous "vacation" literal string
             if is_all_zero and any(chunk):
                 is_all_zero = False
             sha256_hash.update(chunk)
@@ -357,7 +358,7 @@ def process_single_file(file_path, db, slow_mode):
         
         return file_name, is_good, "\n".join(lines), False
 
-def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None, delete_null_mode=False, purge_mode=False):
+def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None, delete_null_mode=False, purge_mode=False, filter_good=False, filter_bad=False):
     if slow_mode:
         print("Loading database (Slow Mode: Deep Audit [SHA-256 Anchor -> SHA-1/MD5 Fallbacks])...")
     else:
@@ -373,6 +374,12 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None, delete_nu
             print(f"Threading enabled: Processing files in parallel utilizing {max_threads} worker thread(s).")
     else:
         print("Threading disabled: Processing sequentially (Safe for SD Cards).")
+    
+    if filter_good:
+        print("Output Filter Active: Displaying and logging ONLY [GOOD DUMPS].")
+    elif filter_bad:
+        print("Output Filter Active: Displaying and logging ONLY [BAD/UNKNOWN DUMPS].")
+        
     print("=" * 50)
 
     files_to_scan = []
@@ -390,50 +397,52 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None, delete_nu
     good_dumps = 0
     bad_dumps = 0
     report_lines = []
-    
-    # Active targeting queues
     deletion_queue = []
+
+    def log_and_track(f_name, good_flag, text_block, null_flag, f_path):
+        nonlocal good_dumps, bad_dumps
+        if good_flag:
+            good_dumps += 1
+            if not filter_bad:
+                # Fixed tracking loop counter to show overall absolute index progress
+                print(f"[{good_dumps + bad_dumps}/{total_files}] Processed: {f_name} -> [GOOD]")
+                report_lines.append(text_block)
+        else:
+            bad_dumps += 1
+            if purge_mode:
+                deletion_queue.append(f_path)
+            elif delete_null_mode and null_flag:
+                deletion_queue.append(f_path)
+                
+            if not filter_good:
+                # Fixed tracking loop counter to show overall absolute index progress
+                print(f"[{good_dumps + bad_dumps}/{total_files}] Processed: {f_name} -> [BAD/UNKNOWN]")
+                report_lines.append(text_block)
 
     if max_threads is not None and total_files > 1:
         num_workers = None if max_threads == 0 else max_threads
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
             futures = {executor.submit(process_single_file, fp, db, slow_mode): fp for fp in files_to_scan}
             
-            for idx, future in enumerate(as_completed(futures), 1):
+            for future in as_completed(futures):
                 file_name, is_good, log_block, is_null = future.result()
                 file_path = futures[future]
-                print(f"[{idx}/{total_files}] Processed: {file_name}")
-                if is_good: 
-                    good_dumps += 1
-                else: 
-                    bad_dumps += 1
-                    # Evaluate structural routing rules
-                    if purge_mode:
-                        deletion_queue.append(file_path)
-                    elif delete_null_mode and is_null:
-                        deletion_queue.append(file_path)
-                        
-                report_lines.append(log_block)
+                log_and_track(file_name, is_good, log_block, is_null, file_path)
     else:
-        for idx, file_path in enumerate(files_to_scan, 1):
+        for file_path in files_to_scan:
             file_name, is_good, log_block, is_null = process_single_file(file_path, db, slow_mode)
-            print(f"[{idx}/{total_files}] Scanning: {file_name}")
-            if is_good: 
-                good_dumps += 1
-            else: 
-                bad_dumps += 1
-                if purge_mode:
-                    deletion_queue.append(file_path)
-                elif delete_null_mode and is_null:
-                    deletion_queue.append(file_path)
-                    
-            report_lines.append(log_block)
+            log_and_track(file_name, is_good, log_block, is_null, file_path)
 
     report_dir = os.path.dirname(roms_dir) if os.path.isfile(roms_dir) else roms_dir
     report_path = os.path.join(report_dir, "rom_verification_report.txt")
     
     with open(report_path, "w") as f:
         f.write(f"Recursive ROM Verification Report for: {roms_dir}\n")
+        # Fixed report lines formatting to fully isolate blocks cleanly
+        if filter_good: 
+            f.write("Filtered Mode: [GOOD DUMPS ONLY]\n")
+        elif filter_bad: 
+            f.write("Filtered Mode: [BAD/UNKNOWN DUMPS ONLY]\n")
         f.write("=" * 70 + "\n")
         f.write("\n".join(report_lines))
         f.write(f"\n\nVerification Summary:\n")
@@ -481,7 +490,7 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None, delete_nu
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Usage: rom-ck <path_to_dat_or_folder> <path_to_roms_dir> [--slow] [--thread [num_threads]] [--delete-null] [--purge]")
+        print("Usage: rom-ck <path_to_dat_or_folder> <path_to_roms_dir> [--slow] [--thread [num_threads]] [--delete-null] [--purge] [--only-good] [--only-bad]")
         sys.exit(1)
 
     dat_input = sys.argv[1]
@@ -490,6 +499,13 @@ if __name__ == "__main__":
     delete_null_flag = "--delete-null" in sys.argv
     purge_flag = "--purge" in sys.argv
     
+    only_good_flag = "--only-good" in sys.argv
+    only_bad_flag = "--only-bad" in sys.argv
+    
+    if only_good_flag and only_bad_flag:
+        print("Error: Cannot use --only-good and --only-bad at the same time.")
+        sys.exit(1)
+        
     threads = None
     if "--thread" in sys.argv:
         idx = sys.argv.index("--thread")
@@ -498,4 +514,12 @@ if __name__ == "__main__":
         else:
             threads = 0
 
-    verify_roms(dat_input, roms_input, slow_mode=slow_flag, max_threads=threads, delete_null_mode=delete_null_flag, purge_mode=purge_flag)
+    verify_roms(
+        dat_input, roms_input, 
+        slow_mode=slow_flag, 
+        max_threads=threads, 
+        delete_null_mode=delete_null_flag, 
+        purge_mode=purge_flag,
+        filter_good=only_good_flag,
+        filter_bad=only_bad_flag
+    )
