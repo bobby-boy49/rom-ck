@@ -158,7 +158,7 @@ def hash_zip_entry(zf, zip_info, header_offset):
 
     with zf.open(zip_info.filename, 'r') as f:
         if header_offset > 0:
-            f.read(header_offset)  
+            f.read(header_offset) 
         while True:
             chunk = f.read(65536)
             if not chunk:
@@ -340,10 +340,16 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None):
     print("=" * 50)
 
     files_to_scan = []
-    for root, _, files in os.walk(roms_dir):
-        for file in files:
-            if file.lower().endswith(VALID_EXTENSIONS) or file.lower().endswith(('.bin', '.rom', '.data')):
-                files_to_scan.append(os.path.join(root, file))
+    
+    # --- FIXED: Handle Standalone Targets vs Directory Tree Scans ---
+    if os.path.isfile(roms_dir):
+        if roms_dir.lower().endswith(VALID_EXTENSIONS) or roms_dir.lower().endswith(('.bin', '.rom', '.data')):
+            files_to_scan.append(roms_dir)
+    elif os.path.isdir(roms_dir):
+        for root, _, files in os.walk(roms_dir):
+            for file in files:
+                if file.lower().endswith(VALID_EXTENSIONS) or file.lower().endswith(('.bin', '.rom', '.data')):
+                    files_to_scan.append(os.path.join(root, file))
 
     total_files = len(files_to_scan)
     good_dumps = 0
@@ -369,7 +375,10 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None):
             else: bad_dumps += 1
             report_lines.append(log_block)
 
-    report_path = os.path.join(roms_dir, "rom_verification_report.txt")
+    # Guard output directory parsing if target path was a standalone file
+    report_dir = os.path.dirname(roms_dir) if os.path.isfile(roms_dir) else roms_dir
+    report_path = os.path.join(report_dir, "rom_verification_report.txt")
+    
     with open(report_path, "w") as f:
         f.write(f"Recursive ROM Verification Report for: {roms_dir}\n")
         f.write("=" * 70 + "\n")
@@ -393,12 +402,12 @@ if __name__ == "__main__":
     roms_input = sys.argv[2]
     slow_flag = "--slow" in sys.argv
     
-    threads = None 
+    threads = None
     if "--thread" in sys.argv:
         idx = sys.argv.index("--thread")
         if idx + 1 < len(sys.argv) and sys.argv[idx + 1].isdigit():
             threads = int(sys.argv[idx + 1])
         else:
-            threads = 0 
+            threads = 0
 
     verify_roms(dat_input, roms_input, slow_mode=slow_flag, max_threads=threads)
