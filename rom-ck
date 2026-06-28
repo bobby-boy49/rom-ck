@@ -195,6 +195,7 @@ def audit_hashes(sha256, sha1, md5, db, slow_mode):
 def process_single_file(file_path, db, slow_mode):
     file_name = os.path.basename(file_path)
     ext = os.path.splitext(file_name)[1].lower()
+    is_null = False
     
     # --- ZIP FILE PARSING LIFECYCLE ---
     if ext == '.zip':
@@ -209,7 +210,10 @@ def process_single_file(file_path, db, slow_mode):
                 
                 if total_entries == 0:
                     lines.append("  Result: Empty Zip Archive")
-                    return file_name, False, "\n".join(lines) + "\n" + "-" * 50
+                    return file_name, False, "\n".join(lines) + "\n" + "-" * 50, False
+                
+                # Zip-wide track to verify if *every single entry* is an empty zero payload
+                all_entries_are_zero = True
                 
                 for z_info in zip_infos:
                     inner_ext = os.path.splitext(z_info.filename)[1].lower()
@@ -223,20 +227,8 @@ def process_single_file(file_path, db, slow_mode):
                     else:
                         inner_header_offset = get_header_offset_from_bytes(b'', inner_ext, z_info.file_size)
                     
-                    # SAFEGUARD: Catch inner archive entries that extract down to 0-byte data footprints
-                    inner_payload_size = z_info.file_size - inner_header_offset
-                    if inner_payload_size <= 0:
-                        entry_line = f"  -> Inside Zip: {z_info.filename}"
-                        lines.extend([
-                            entry_line,
-                            "     RESULT: [EMPTY INNER FILE] Error: Sub-file payload contains 0 bytes.",
-                            "     " + "." * 30
-                        ])
-                        continue
-
                     z_sha256, z_sha1, z_md5, z_is_zero = hash_zip_entry(zf, z_info, inner_header_offset)
                     
-                    # DYNAMIC NULL BYTE SAFEGUARD: Bypasses matching for any all-zero payload layout
                     if z_is_zero:
                         entry_line = f"  -> Inside Zip: {z_info.filename}"
                         lines.extend([
@@ -249,6 +241,7 @@ def process_single_file(file_path, db, slow_mode):
                         ])
                         continue
 
+                    all_entries_are_zero = False
                     matched_entries, method = audit_hashes(z_sha256, z_sha1, z_md5, db, slow_mode)
                     
                     entry_line = f"  -> Inside Zip: {z_info.filename}"
@@ -275,49 +268,35 @@ def process_single_file(file_path, db, slow_mode):
                             else:
                                 matches_display.append(entry)
                         
-                        # BIOS SUMMARY TRUNCATION CAP: Keep shared chip lines short
-                        if len(matches_display) > 5:
-                            truncated_count = len(matches_display) - 5
-                            display_str = ", ".join(matches_display[:5]) + f" ... and {truncated_count} other system variants"
-                        else:
-                            display_str = ", ".join(matches_display)
-
-                        lines.append(f"     RESULT: [GOOD MATCH] Variants: {display_str} via {method}")
+                        lines.append(f"     RESULT: [GOOD MATCH] Variants: {', '.join(matches_display)} via {method}")
                     else:
                         lines.append(f"     RESULT: [UNKNOWN/BAD INNER FILE]")
                     lines.append("     " + "." * 30)
+                
+                if total_entries > 0 and all_entries_are_zero:
+                    is_null = True
                     
         except zipfile.BadZipFile:
             lines.append("  RESULT: [CORRUPT ZIP ARCHIVE]")
-            return file_name, False, "\n".join(lines) + "\n" + "-" * 50
+            return file_name, False, "\n".join(lines) + "\n" + "-" * 50, False
 
         is_good = (good_entries == total_entries and total_entries > 0)
         if is_good:
             lines.append(f"  FINAL SUMMARY RESULT: [GOOD DUMP] All {good_entries}/{total_entries} sub-files authenticated.")
         else:
-            lines.append(f"  FINAL SUMMARY RESULT: [BAD/UNKNOWN DUMP] Found {total_entries - good_entries} unmapped sub-files.")
+            if is_null:
+                lines.append(f"  FINAL SUMMARY RESULT: [BAD/GHOST ZIP] Entire archive container holds strictly empty zeroes.")
+            else:
+                lines.append(f"  FINAL SUMMARY RESULT: [BAD/UNKNOWN DUMP] Found {total_entries - good_entries} unmapped sub-files.")
         lines.append("-" * 50)
-        return file_name, is_good, "\n".join(lines)
+        return file_name, is_good, "\n".join(lines), is_null
 
     # --- STANDARD / EXTRACTED FILE LIFECYCLE ---
     else:
         file_size = os.path.getsize(file_path)
         header_offset = get_header_offset(file_path, ext, file_size)
-
-        # SAFEGUARD: Catch unzipped files or header-stripped payloads that evaluate to 0 bytes
-        payload_size = file_size - header_offset
-        if payload_size <= 0:
-            lines = [
-                f"File: {file_name}",
-                f"  Header Status: {'Headered' if header_offset > 0 else 'Headerless'}",
-                f"  RESULT: [BAD/UNKNOWN DUMP] Error: File payload contains 0 bytes of data.",
-                "-" * 50
-            ]
-            return file_name, False, "\n".join(lines)
-
         sha256, sha1, md5, is_zero = hash_rom(file_path, header_offset)
 
-        # DYNAMIC NULL BYTE SAFEGUARD: Bypasses matching for any all-zero loose file
         if is_zero:
             lines = [
                 f"File: {file_name}",
@@ -328,11 +307,9 @@ def process_single_file(file_path, db, slow_mode):
                 f"  RESULT: [BAD/GHOST DUMP] Error: File payload consists entirely of blank null zeroes.",
                 "-" * 50
             ]
-            return file_name, False, "\n".join(lines)
+            return file_name, False, "\n".join(lines), True
 
         matched_entries, method = audit_hashes(sha256, sha1, md5, db, slow_mode)
-
-        # Dynamic label adjustment based on target file extensions
         match_tag = "[Extracted Chip Match:" if ext in ('.bin', '.rom', '.data') else "[Exact File Name Match:"
 
         if matched_entries:
@@ -357,15 +334,7 @@ def process_single_file(file_path, db, slow_mode):
                             matches_display.append(g_name)
                     else:
                         matches_display.append(entry)
-                
-                # BIOS SUMMARY TRUNCATION CAP: Keep shared chip lines short
-                if len(matches_display) > 5:
-                    truncated_count = len(matches_display) - 5
-                    display_str = ", ".join(matches_display[:5]) + f" ... and {truncated_count} other system variants"
-                else:
-                    display_str = ", ".join(matches_display)
-
-                result = f"[GOOD DUMP] Matches: {display_str} via {method}"
+                result = f"[GOOD DUMP] Matches: {', '.join(matches_display)} via {method}"
             is_good = True
         else:
             result = "[BAD/UNKNOWN DUMP]"
@@ -386,9 +355,9 @@ def process_single_file(file_path, db, slow_mode):
             "-" * 50
         ])
         
-        return file_name, is_good, "\n".join(lines)
+        return file_name, is_good, "\n".join(lines), False
 
-def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None):
+def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None, delete_null_mode=False, purge_mode=False):
     if slow_mode:
         print("Loading database (Slow Mode: Deep Audit [SHA-256 Anchor -> SHA-1/MD5 Fallbacks])...")
     else:
@@ -408,7 +377,6 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None):
 
     files_to_scan = []
     
-    # Handle Standalone Targets vs Directory Tree Scans
     if os.path.isfile(roms_dir):
         if roms_dir.lower().endswith(VALID_EXTENSIONS) or roms_dir.lower().endswith(('.bin', '.rom', '.data')):
             files_to_scan.append(roms_dir)
@@ -422,6 +390,9 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None):
     good_dumps = 0
     bad_dumps = 0
     report_lines = []
+    
+    # Active targeting queues
+    deletion_queue = []
 
     if max_threads is not None and total_files > 1:
         num_workers = None if max_threads == 0 else max_threads
@@ -429,20 +400,35 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None):
             futures = {executor.submit(process_single_file, fp, db, slow_mode): fp for fp in files_to_scan}
             
             for idx, future in enumerate(as_completed(futures), 1):
-                file_name, is_good, log_block = future.result()
+                file_name, is_good, log_block, is_null = future.result()
+                file_path = futures[future]
                 print(f"[{idx}/{total_files}] Processed: {file_name}")
-                if is_good: good_dumps += 1
-                else: bad_dumps += 1
+                if is_good: 
+                    good_dumps += 1
+                else: 
+                    bad_dumps += 1
+                    # Evaluate structural routing rules
+                    if purge_mode:
+                        deletion_queue.append(file_path)
+                    elif delete_null_mode and is_null:
+                        deletion_queue.append(file_path)
+                        
                 report_lines.append(log_block)
     else:
         for idx, file_path in enumerate(files_to_scan, 1):
-            file_name, is_good, log_block = process_single_file(file_path, db, slow_mode)
+            file_name, is_good, log_block, is_null = process_single_file(file_path, db, slow_mode)
             print(f"[{idx}/{total_files}] Scanning: {file_name}")
-            if is_good: good_dumps += 1
-            else: bad_dumps += 1
+            if is_good: 
+                good_dumps += 1
+            else: 
+                bad_dumps += 1
+                if purge_mode:
+                    deletion_queue.append(file_path)
+                elif delete_null_mode and is_null:
+                    deletion_queue.append(file_path)
+                    
             report_lines.append(log_block)
 
-    # Guard output directory parsing if target path was a standalone file
     report_dir = os.path.dirname(roms_dir) if os.path.isfile(roms_dir) else roms_dir
     report_path = os.path.join(report_dir, "rom_verification_report.txt")
     
@@ -453,6 +439,8 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None):
         f.write(f"\n\nVerification Summary:\n")
         f.write(f"Total Good Dumps: {good_dumps}\n")
         f.write(f"Total Bad/Unknown Dumps: {bad_dumps}\n")
+        if delete_null_mode or purge_mode:
+            f.write(f"Total Items Flagged for Removal Queue: {len(deletion_queue)}\n")
 
     print("\n" + "=" * 50)
     print("Verification Summary:")
@@ -460,14 +448,47 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None):
     print(f"Total Bad/Unknown Dumps: {bad_dumps}")
     print(f"\nDone! Master report saved to: {report_path}")
 
+    # --- ACTION TRAP ENGINE ---
+    if delete_null_mode or purge_mode:
+        print("=" * 50)
+        mode_label = "PURGE ALL BAD DUMPS" if purge_mode else "DELETE ALL-ZERO NULL ROMS"
+        
+        if not deletion_queue:
+            print(f"Active Option [{mode_label}]: Drive path clean! No targets matched this criterion.")
+        else:
+            print(f"CRITICAL ACTION REQUIRED: [{mode_label}] Mode holds {len(deletion_queue)} item(s) for removal!")
+            print("The following files are slated for permanent disk deletion:")
+            for item in deletion_queue:
+                print(f" -> {item}")
+            print("-" * 50)
+            
+            prompt_str = 'To confirm deletion, please type exactly:\n"Yes, do as I say!"\n\nConfirmation Entry: '
+            user_auth = input(prompt_str)
+            
+            if user_auth == "Yes, do as I say!":
+                print("\nAuthentication matched. Dropping targets...")
+                deleted_count = 0
+                for item in deletion_queue:
+                    try:
+                        os.remove(item)
+                        print(f" [REMOVED] deleted: {os.path.basename(item)}")
+                        deleted_count += 1
+                    except OSError as err:
+                        print(f" [ERROR] Could not un-link file target {item}: {err}")
+                print(f"\nCompleted! Successfully wiped {deleted_count} file(s) from local filesystem arrays.")
+            else:
+                print("\nConfirmation entry mismatch! Operation aborted. Drive contents preserved.")
+
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Usage: rom-ck <path_to_dat_or_folder> <path_to_roms_dir> [--slow] [--thread [num_threads]]")
+        print("Usage: rom-ck <path_to_dat_or_folder> <path_to_roms_dir> [--slow] [--thread [num_threads]] [--delete-null] [--purge]")
         sys.exit(1)
 
     dat_input = sys.argv[1]
     roms_input = sys.argv[2]
     slow_flag = "--slow" in sys.argv
+    delete_null_flag = "--delete-null" in sys.argv
+    purge_flag = "--purge" in sys.argv
     
     threads = None
     if "--thread" in sys.argv:
@@ -477,4 +498,4 @@ if __name__ == "__main__":
         else:
             threads = 0
 
-    verify_roms(dat_input, roms_input, slow_mode=slow_flag, max_threads=threads)
+    verify_roms(dat_input, roms_input, slow_mode=slow_flag, max_threads=threads, delete_null_mode=delete_null_flag, purge_mode=purge_flag)
