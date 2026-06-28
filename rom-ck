@@ -221,6 +221,17 @@ def process_single_file(file_path, db, slow_mode):
                     else:
                         inner_header_offset = get_header_offset_from_bytes(b'', inner_ext, z_info.file_size)
                     
+                    # SAFEGUARD: Catch inner archive entries that extract down to 0-byte data footprints
+                    inner_payload_size = z_info.file_size - inner_header_offset
+                    if inner_payload_size <= 0:
+                        entry_line = f"  -> Inside Zip: {z_info.filename}"
+                        lines.extend([
+                            entry_line,
+                            "     RESULT: [EMPTY INNER FILE] Error: Sub-file payload contains 0 bytes.",
+                            "     " + "." * 30
+                        ])
+                        continue
+
                     z_sha256, z_sha1, z_md5 = hash_zip_entry(zf, z_info, inner_header_offset)
                     matched_entries, method = audit_hashes(z_sha256, z_sha1, z_md5, db, slow_mode)
                     
@@ -241,7 +252,6 @@ def process_single_file(file_path, db, slow_mode):
                             if isinstance(entry, tuple):
                                 g_name, r_name = entry
                                 if r_name and r_name.lower() == inner_base_name.lower():
-                                    # Use context-aware tags inside archives as well
                                     tag = "[Chip Match:" if inner_ext in ('.bin', '.rom', '.data') else "[Exact File Match:"
                                     matches_display.append(f"{g_name} {tag} {r_name}]")
                                 else:
@@ -269,8 +279,19 @@ def process_single_file(file_path, db, slow_mode):
     else:
         file_size = os.path.getsize(file_path)
         header_offset = get_header_offset(file_path, ext, file_size)
-        sha256, sha1, md5 = hash_rom(file_path, header_offset)
 
+        # SAFEGUARD: Catch unzipped files or header-stripped payloads that evaluate to 0 bytes
+        payload_size = file_size - header_offset
+        if payload_size <= 0:
+            lines = [
+                f"File: {file_name}",
+                f"  Header Status: {'Headered' if header_offset > 0 else 'Headerless'}",
+                f"  RESULT: [BAD/UNKNOWN DUMP] Error: File payload contains 0 bytes of data.",
+                "-" * 50
+            ]
+            return file_name, False, "\n".join(lines)
+
+        sha256, sha1, md5 = hash_rom(file_path, header_offset)
         matched_entries, method = audit_hashes(sha256, sha1, md5, db, slow_mode)
 
         # Dynamic label adjustment based on target file extensions
