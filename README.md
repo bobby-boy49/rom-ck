@@ -18,7 +18,7 @@ Here is a Gemini list of features!
 - **Output & Report Isolation Filters**: Includes granular tracking flags (`--only-good` and `--only-bad`) to tailor your console outputs and generated summary logs:
   - `--only-good`: Displays and logs exclusively verified healthy dumps.
   - `--only-bad`: Transforms the script into an error monitor, hiding passing files to expose only unknown, corrupted, or ghost dumps.
-- **Dynamic Asynchronous Progress Tracking**: Built-in thread-safe job completion architecture accurately updates real-time execution statistics (`[Current / Total]`) across multi-threaded operations—even when hidden files are omitted by active output filters.
+- **Dynamic Asynchronous Progress Tracking**: Built-in thread-safe job completion architecture accurately updates real-time execution statistics (`[Current / Total]`) across multi-threaded operations even when hidden files are omitted by active output filters.
 - **Hardware-Accelerated Concurrency**: Leverages a multi-threaded parallel workspace to audit thousands of files simultaneously across available CPU architectures.
 - **Safe Automated Purge Engine**: Features target queues (`--delete-null` and `--purge`) paired with a clear-text terminal confirmation safe-guard (`"Yes, do as I say!"`) to permanently scrub unmapped or corrupted binaries from filesystem arrays safely.
 
