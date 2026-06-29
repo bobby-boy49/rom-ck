@@ -163,7 +163,6 @@ def hash_zip_entry(zf, zip_info, header_offset):
             chunk = f.read(65536)
             if not chunk:
                 break
-            # Fixed syntax bug: Removed erroneous "vacation" literal string
             if is_all_zero and any(chunk):
                 is_all_zero = False
             sha256_hash.update(chunk)
@@ -197,6 +196,7 @@ def process_single_file(file_path, db, slow_mode):
     file_name = os.path.basename(file_path)
     ext = os.path.splitext(file_name)[1].lower()
     is_null = False
+    display_cutoff = 5  # Cut off rendering after 5 systems to catch shared BIOS walls
     
     # --- ZIP FILE PARSING LIFECYCLE ---
     if ext == '.zip':
@@ -213,7 +213,6 @@ def process_single_file(file_path, db, slow_mode):
                     lines.append("  Result: Empty Zip Archive")
                     return file_name, False, "\n".join(lines) + "\n" + "-" * 50, False
                 
-                # Zip-wide track to verify if *every single entry* is an empty zero payload
                 all_entries_are_zero = True
                 
                 for z_info in zip_infos:
@@ -258,7 +257,7 @@ def process_single_file(file_path, db, slow_mode):
                     if matched_entries:
                         good_entries += 1
                         matches_display = []
-                        for entry in matched_entries:
+                        for entry in matched_entries[:display_cutoff]:
                             if isinstance(entry, tuple):
                                 g_name, r_name = entry
                                 if r_name and r_name.lower() == inner_base_name.lower():
@@ -269,7 +268,11 @@ def process_single_file(file_path, db, slow_mode):
                             else:
                                 matches_display.append(entry)
                         
-                        lines.append(f"     RESULT: [GOOD MATCH] Variants: {', '.join(matches_display)} via {method}")
+                        summary_str = ", ".join(matches_display)
+                        if len(matched_entries) > display_cutoff:
+                            summary_str += f" ... and {len(matched_entries) - display_cutoff} other machine variants (Shared BIOS/Driver)"
+                        
+                        lines.append(f"     RESULT: [GOOD MATCH] Variants: {summary_str} via {method}")
                     else:
                         lines.append(f"     RESULT: [UNKNOWN/BAD INNER FILE]")
                     lines.append("     " + "." * 30)
@@ -326,7 +329,7 @@ def process_single_file(file_path, db, slow_mode):
                     result = f"[GOOD DUMP] Matches: {entry} via {method}"
             else:
                 matches_display = []
-                for entry in matched_entries:
+                for entry in matched_entries[:display_cutoff]:
                     if isinstance(entry, tuple):
                         g_name, r_name = entry
                         if r_name and r_name.lower() == file_name.lower():
@@ -335,7 +338,12 @@ def process_single_file(file_path, db, slow_mode):
                             matches_display.append(g_name)
                     else:
                         matches_display.append(entry)
-                result = f"[GOOD DUMP] Matches: {', '.join(matches_display)} via {method}"
+                
+                summary_str = ", ".join(matches_display)
+                if len(matched_entries) > display_cutoff:
+                    summary_str += f" ... and {len(matched_entries) - display_cutoff} other machine variants (Shared BIOS/Driver)"
+                
+                result = f"[GOOD DUMP] Matches: {summary_str} via {method}"
             is_good = True
         else:
             result = "[BAD/UNKNOWN DUMP]"
@@ -404,7 +412,6 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None, delete_nu
         if good_flag:
             good_dumps += 1
             if not filter_bad:
-                # Fixed tracking loop counter to show overall absolute index progress
                 print(f"[{good_dumps + bad_dumps}/{total_files}] Processed: {f_name} -> [GOOD]")
                 report_lines.append(text_block)
         else:
@@ -415,7 +422,6 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None, delete_nu
                 deletion_queue.append(f_path)
                 
             if not filter_good:
-                # Fixed tracking loop counter to show overall absolute index progress
                 print(f"[{good_dumps + bad_dumps}/{total_files}] Processed: {f_name} -> [BAD/UNKNOWN]")
                 report_lines.append(text_block)
 
@@ -438,7 +444,6 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None, delete_nu
     
     with open(report_path, "w") as f:
         f.write(f"Recursive ROM Verification Report for: {roms_dir}\n")
-        # Fixed report lines formatting to fully isolate blocks cleanly
         if filter_good: 
             f.write("Filtered Mode: [GOOD DUMPS ONLY]\n")
         elif filter_bad: 
