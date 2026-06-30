@@ -83,15 +83,18 @@ def parse_dats(dat_path):
 
                         if sha1:
                             sha1_lower = sha1.lower()
-                            if sha1_lower not in db['sha1']: db['sha1'][sha1_lower] = []
+                            if sha1_lower not in db['sha1']:
+                                db['sha1'][sha1_lower] = []
                             db['sha1'][sha1_lower].append(map_value)
                         if sha256:
                             sha256_lower = sha256.lower()
-                            if sha256_lower not in db['sha256']: db['sha256'][sha256_lower] = []
+                            if sha256_lower not in db['sha256']:
+                                db['sha256'][sha256_lower] = []
                             db['sha256'][sha256_lower].append(map_value)
                         if md5:
                             md5_lower = md5.lower()
-                            if md5_lower not in db['md5']: db['md5'][md5_lower] = []
+                            if md5_lower not in db['md5']:
+                                db['md5'][md5_lower] = []
                             db['md5'][md5_lower].append(map_value)
                     
                     if elem.tag in ('rom', 'game', 'machine'):
@@ -274,7 +277,7 @@ def process_single_file(file_path, db, slow_mode):
                         
                         lines.append(f"     RESULT: [GOOD MATCH] Variants: {summary_str} via {method}")
                     else:
-                        lines.append(f"     RESULT: [UNKNOWN/BAD INNER FILE]")
+                        lines.append("     RESULT: [UNKNOWN/BAD INNER FILE]")
                     lines.append("     " + "." * 30)
                 
                 if total_entries > 0 and all_entries_are_zero:
@@ -289,7 +292,7 @@ def process_single_file(file_path, db, slow_mode):
             lines.append(f"  FINAL SUMMARY RESULT: [GOOD DUMP] All {good_entries}/{total_entries} sub-files authenticated.")
         else:
             if is_null:
-                lines.append(f"  FINAL SUMMARY RESULT: [BAD/GHOST ZIP] Entire archive container holds strictly empty zeroes.")
+                lines.append("  FINAL SUMMARY RESULT: [BAD/GHOST ZIP] Entire archive container holds strictly empty zeroes.")
             else:
                 lines.append(f"  FINAL SUMMARY RESULT: [BAD/UNKNOWN DUMP] Found {total_entries - good_entries} unmapped sub-files.")
         lines.append("-" * 50)
@@ -308,7 +311,7 @@ def process_single_file(file_path, db, slow_mode):
                 f"  SHA-1:  {sha1}",
                 f"  MD5:    {md5}",
                 f"  SHA-256:{sha256}",
-                f"  RESULT: [BAD/GHOST DUMP] Error: File payload consists entirely of blank null zeroes.",
+                "  RESULT: [BAD/GHOST DUMP] Error: File payload consists entirely of blank null zeroes.",
                 "-" * 50
             ]
             return file_name, False, "\n".join(lines), True
@@ -351,10 +354,10 @@ def process_single_file(file_path, db, slow_mode):
 
         lines = [f"File: {file_name}"]
         if header_offset > 0:
-            lines.append(f"  Header Status: Headered")
+            lines.append("  Header Status: Headered")
             lines.append(f"  Header Skipped: {header_offset} bytes")
         else:
-            lines.append(f"  Header Status: Headerless")
+            lines.append("  Header Status: Headerless")
             
         lines.extend([
             f"  SHA-1:  {sha1}",
@@ -450,7 +453,7 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None, delete_nu
             f.write("Filtered Mode: [BAD/UNKNOWN DUMPS ONLY]\n")
         f.write("=" * 70 + "\n")
         f.write("\n".join(report_lines))
-        f.write(f"\n\nVerification Summary:\n")
+        f.write("\n\nVerification Summary:\n")
         f.write(f"Total Good Dumps: {good_dumps}\n")
         f.write(f"Total Bad/Unknown Dumps: {bad_dumps}\n")
         if delete_null_mode or purge_mode:
