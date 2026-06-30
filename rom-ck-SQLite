@@ -102,7 +102,9 @@ def parse_dats(dat_path, db_path="dat_cache.db"):
                         if rom_file_name:
                             rom_lower = rom_file_name.lower()
                             game_lower = current_game.lower()
-                            if rom_lower in (f"{game_lower}.nes", f"{game_lower}.sfc", f"{game_lower}.bin"):
+                            
+                            # Check if the filename exactly matches [Game Name] + [Any Extension]
+                            if any(rom_lower == f"{game_lower}{ext.lower()}" for ext in VALID_EXTENSIONS):
                                 has_custom_name = False
 
                         db_rom_name = rom_file_name if (rom_file_name and has_custom_name) else None
