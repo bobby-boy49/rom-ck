@@ -74,10 +74,16 @@ def parse_dats(dat_path):
                         md5 = elem.get('md5')
                         rom_file_name = elem.get('name')
 
-                        if rom_file_name and rom_file_name.lower() != f"{current_game.lower()}.nes" and \
-                           rom_file_name.lower() != f"{current_game.lower()}.sfc" and \
-                           rom_file_name.lower() != f"{current_game.lower()}.bin":
-                            map_value = (current_game, rom_file_name)
+                        # FIX 1: DYNAMIC REDUNDANCY FILTER
+                        if rom_file_name:
+                            rom_lower = rom_file_name.lower()
+                            game_lower = current_game.lower()
+                            is_redundant = any(rom_lower == f"{game_lower}{ext.lower()}" for ext in VALID_EXTENSIONS)
+                            
+                            if is_redundant:
+                                map_value = current_game
+                            else:
+                                map_value = (current_game, rom_file_name)
                         else:
                             map_value = current_game
 
@@ -126,12 +132,11 @@ def get_header_offset_from_bytes(magic_4bytes, ext, file_size):
 
     return header_offset
 
+# FIX 2: DYNAMIC LOOSE FILE HEADER ENGINE
 def get_header_offset(file_path, ext, file_size):
-    if ext in ['.nes', '.a78', '.lnx']:
-        with open(file_path, 'rb') as f:
-            magic = f.read(4)
-        return get_header_offset_from_bytes(magic, ext, file_size)
-    return get_header_offset_from_bytes(b'', ext, file_size)
+    with open(file_path, 'rb') as f:
+        magic = f.read(4)
+    return get_header_offset_from_bytes(magic, ext, file_size)
 
 def hash_rom(file_path, header_offset):
     sha256_hash = hashlib.sha256()
@@ -222,13 +227,10 @@ def process_single_file(file_path, db, slow_mode):
                     inner_ext = os.path.splitext(z_info.filename)[1].lower()
                     inner_base_name = os.path.basename(z_info.filename)
                     
-                    inner_header_offset = 0
-                    if inner_ext in ['.nes', '.a78', '.lnx']:
-                        with zf.open(z_info.filename, 'r') as f:
-                            magic = f.read(4)
-                        inner_header_offset = get_header_offset_from_bytes(magic, inner_ext, z_info.file_size)
-                    else:
-                        inner_header_offset = get_header_offset_from_bytes(b'', inner_ext, z_info.file_size)
+                    # FIX 3: DYNAMIC ZIP ENTRY HEADER ENGINE
+                    with zf.open(z_info.filename, 'r') as f:
+                        magic = f.read(4)
+                    inner_header_offset = get_header_offset_from_bytes(magic, inner_ext, z_info.file_size)
                     
                     z_sha256, z_sha1, z_md5, z_is_zero = hash_zip_entry(zf, z_info, inner_header_offset)
                     
