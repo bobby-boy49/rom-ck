@@ -15,11 +15,11 @@ VALID_EXTENSIONS = (
     '.zip',                          # Arcade (MAME) / Compressed Cartridges
     
     # --- Nintendo ---
+    '.z64', '.v64', '.n64', '.rom',  # Nintendo 64
     '.gba', '.gbc', '.gb',           # Game Boy, Color, Advance
     '.nes', '.sfc', '.smc',          # NES / SNES
     '.nds', '.3ds',                  # Nintendo DS / 3DS
     '.iso',                          # GameCube / Wii (Raw Discs)
-    '.z64', '.v64', '.n64', '.rom',  # Nintendo 64
     
     # --- Sega ---
     '.md', '.bin', '.gen',           # Genesis / Mega Drive
@@ -160,12 +160,11 @@ def get_header_offset_from_bytes(magic_4bytes, ext, file_size):
 
     return header_offset
 
+# FIX 2: DYNAMIC LOOSE FILE HEADER ENGINE (SYNCHRONIZED)
 def get_header_offset(file_path, ext, file_size):
-    if ext in ['.nes', '.a78', '.lnx']:
-        with open(file_path, 'rb') as f:
-            magic = f.read(4)
-        return get_header_offset_from_bytes(magic, ext, file_size)
-    return get_header_offset_from_bytes(b'', ext, file_size)
+    with open(file_path, 'rb') as f:
+        magic = f.read(4)
+    return get_header_offset_from_bytes(magic, ext, file_size)
 
 def hash_rom(file_path, header_offset):
     sha256_hash = hashlib.sha256()
@@ -241,7 +240,7 @@ def process_single_file(file_path, db_path, slow_mode):
         file_name = os.path.basename(file_path)
         ext = os.path.splitext(file_name)[1].lower()
         is_null = False
-        display_cutoff = 5 
+        display_cutoff = 5  
         
         # --- ZIP FILE PARSING LIFECYCLE ---
         if ext == '.zip':
@@ -293,7 +292,6 @@ def process_single_file(file_path, db_path, slow_mode):
                             entry_line += f" (Headered, Skipped {inner_header_offset} bytes)"
                         else:
                             entry_line += " (Headerless)"
-               
                         lines.append(entry_line)
                         lines.append(f"     SHA-1:  {z_sha1}")
                         lines.append(f"     MD5:    {z_md5}")
@@ -321,7 +319,7 @@ def process_single_file(file_path, db_path, slow_mode):
                         else:
                             lines.append("     RESULT: [UNKNOWN/BAD INNER FILE]")
                         lines.append("     " + "." * 30)
-             
+                    
                     if total_entries > 0 and all_entries_are_zero:
                         is_null = True
                        
@@ -383,6 +381,7 @@ def process_single_file(file_path, db_path, slow_mode):
                                 matches_display.append(g_name)
                         else:
                             matches_display.append(entry)
+                    
                     summary_str = ", ".join(matches_display)
                     if len(matched_entries) > display_cutoff:
                         summary_str += f" ... and {len(matched_entries) - display_cutoff} other machine variants (Shared BIOS/Driver)"
@@ -407,22 +406,13 @@ def process_single_file(file_path, db_path, slow_mode):
             ])
             return file_name, is_good, "\n".join(lines), False
 
-def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None, delete_null_mode=False, purge_mode=False, filter_good=False, filter_bad=False, save_cache_path=None, use_cache_path=None):
-    if use_cache_path:
-        if not os.path.exists(use_cache_path):
-            print(f"Error: Specified cache database not found at {use_cache_path}")
-            sys.exit(1)
-        print(f"Loading existing cache database from: {use_cache_path} (Skipping DAT parsing)...")
-        db_path = use_cache_path
+def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None, delete_null_mode=False, purge_mode=False, filter_good=False, filter_bad=False):
+    if slow_mode:
+        print("Loading database (Slow Mode: Deep Audit [SHA-256 Anchor -> SHA-1/MD5 Fallbacks])...")
     else:
-        if slow_mode:
-            print("Loading database (Slow Mode: Deep Audit [SHA-256 Anchor -> SHA-1/MD5 Fallbacks])...")
-        else:
-            print("Loading database (Fast Mode: Sequential [SHA-1 Anchor Only])...")
-            
-        db_to_create = save_cache_path if save_cache_path else "dat_cache.db"
-        db_path = parse_dats(dat_path, db_path=db_to_create)
+        print("Loading database (Fast Mode: Sequential [SHA-1 Anchor Only])...")
         
+    db_path = parse_dats(dat_path)
     print(f"Recursively scanning: {roms_dir}")
     
     if max_threads is not None:
@@ -455,6 +445,7 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None, delete_nu
     report_lines = []
     deletion_queue = []
 
+    # FIX: RESOLVED INDENTATION / LOGIC FLOW TO MATCH BASE SCRIPT
     def log_and_track(f_name, good_flag, text_block, null_flag, f_path):
         nonlocal good_dumps, bad_dumps
         if good_flag:
@@ -468,6 +459,7 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None, delete_nu
                 deletion_queue.append(f_path)
             elif delete_null_mode and null_flag:
                 deletion_queue.append(f_path)
+                
             if not filter_good:
                 print(f"[{good_dumps + bad_dumps}/{total_files}] Processed: {f_name} -> [BAD/UNKNOWN]")
                 report_lines.append(text_block)
@@ -488,144 +480,93 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None, delete_nu
     report_dir = os.path.dirname(roms_dir) if os.path.isfile(roms_dir) else roms_dir
     report_path = os.path.join(report_dir, "rom_verification_report.txt")
     
+    # REPORT LOG GENERATION (SYNCHRONIZED WITH BASE LAYOUT)
     try:
-        with open(report_path, 'w', encoding='utf-8') as rf:
-            rf.write("ROM VERIFICATION REPORT\n")
-            rf.write(f"Target Scan Directory: {roms_dir}\n")
-            if filter_good:
-                rf.write("Filtered Mode: [GOOD DUMPS ONLY]\n")
-            elif filter_bad:
-                rf.write("Filtered Mode: [BAD/UNKNOWN DUMPS ONLY]\n")
-            rf.write("=" * 60 + "\n\n")
-            rf.write("\n".join(report_lines))
-            rf.write("\n\n" + "=" * 60 + "\n")
-            rf.write(" VERIFICATION SUMMARY METRICS\n")
-            rf.write("=" * 60 + "\n")
-            rf.write(f" Total Files Analyzed: {total_files}\n")
-            rf.write(f" Authenticated [GOOD] Dumps: {good_dumps}\n")
-            rf.write(f" Unmapped / Corrupt [BAD] Dumps: {bad_dumps}\n")
+        with open(report_path, "w", encoding="utf-8") as f:
+            f.write(f"ROM Verification Report for: {roms_dir}\n")
+            if filter_good: 
+                f.write("Filtered Mode: [GOOD DUMPS ONLY]\n")
+            elif filter_bad: 
+                f.write("Filtered Mode: [BAD/UNKNOWN DUMPS ONLY]\n")
+            f.write("=" * 70 + "\n")
+            f.write("\n".join(report_lines))
+            f.write("\n\nVerification Summary:\n")
+            f.write(f"Total Good Dumps: {good_dumps}\n")
+            f.write(f"Total Bad/Unknown Dumps: {bad_dumps}\n")
             if delete_null_mode or purge_mode:
-                rf.write(f" Total Items Flagged for Removal: {len(deletion_queue)}\n")
-            rf.write("=" * 60 + "\n")
-        print(f"\n[REPORT GENERATED] Summary report written to: {report_path}")
+                f.write(f"Total Items Flagged for Removal Queue: {len(deletion_queue)}\n")
     except IOError as e:
         print(f"\n[ERROR] Failed writing summary report log file to disk: {e}")
 
+    # TERMINAL DISPLAY OUTPUT (SYNCHRONIZED WITH BASE LAYOUT)
     print("\n" + "=" * 50)
-    print(" SCAN COMPLETED SUMMARY RESULTS")
-    print("=" * 50)
-    print(f" Total Files Checked: {total_files}")
-    print(f" Authenticated Dumps (GOOD): {good_dumps}")
-    print(f" Unmapped / Corrupt (BAD):  {bad_dumps}")
-    print("=" * 50)
+    print("Verification Summary:")
+    print(f"Total Good Dumps: {good_dumps}")
+    print(f"Total Bad/Unknown Dumps: {bad_dumps}")
+    print(f"\nDone! Master report saved to: {report_path}")
 
-    # Smart cleanup handler
-    if not use_cache_path and not save_cache_path:
-        if os.path.exists(db_path):
-            try:
-                os.remove(db_path)
-            except OSError:
-                pass
-    elif save_cache_path:
-        print(f"[CACHE RETAINED] Persistent database successfully saved to: {save_cache_path}")
-    elif use_cache_path:
-        print(f"[CACHE PRESERVED] Loaded database was left intact at: {use_cache_path}")
+    if os.path.exists(db_path):
+        try:
+            os.remove(db_path)
+        except OSError:
+            pass
 
-    # --- ACTION TRAP ENGINE ---
-    if deletion_queue:
-        deleted_count = 0
-        print(f"\n[!] ACTION REQUIRED: System flagged {len(deletion_queue)} files for local storage cleanup.")
-        if purge_mode:
-            print(" -> Reason: Script ran with '--purge'. All unmapped/corrupt files will be dropped.")
-        elif delete_null_mode:
-            print(" -> Reason: Script ran with '--delete-null'. Ghost files filled entirely with blank zeroes will be dropped.")
+    # --- ACTION TRAP ENGINE (SYNCHRONIZED PASSPHRASE AUTH ROUTINE) ---
+    if delete_null_mode or purge_mode:
+        print("=" * 50)
+        mode_label = "PURGE ALL BAD DUMPS" if purge_mode else "DELETE ALL-ZERO NULL ROMS"
         
-        print("\nWARNING: This process modifies your local storage array permanently. Deleted files cannot be un-done.")
-        confirm = input("Type 'CONFIRM' to execute filesystem deletion routine: ")
-        
-        if confirm == 'CONFIRM':
-            print("\nExecuting filesystem wipe processing...")
-            for item in deletion_queue:
-                try:
-                    os.remove(item)
-                    print(f" [DELETED] Removed target file: {os.path.basename(item)}")
-                    deleted_count += 1
-                except OSError as err:
-                    print(f" [ERROR] Could not un-link file target {item}: {err}")
-            print(f"\nCompleted! Successfully wiped {deleted_count} file(s) from local filesystem arrays.")
+        if not deletion_queue:
+            print(f"Active Option [{mode_label}]: Drive path clean! No targets matched this criterion.")
         else:
-            print("\nConfirmation entry mismatch! Operation aborted. Drive contents preserved.")
+            print(f"CRITICAL ACTION REQUIRED: [{mode_label}] Mode holds {len(deletion_queue)} item(s) for removal!")
+            print("The following files are slated for permanent disk deletion:")
+            for item in deletion_queue:
+                print(f" -> {item}")
+            print("-" * 50)
+            
+            prompt_str = 'To confirm deletion, please type exactly:\n"Yes, do as I say!"\n\nConfirmation Entry: '
+            user_auth = input(prompt_str)
+            
+            if user_auth == "Yes, do as I say!":
+                print("\nAuthentication matched. Dropping targets...")
+                deleted_count = 0
+                for item in deletion_queue:
+                    try:
+                        os.remove(item)
+                        print(f" [REMOVED] deleted: {os.path.basename(item)}")
+                        deleted_count += 1
+                    except OSError as err:
+                        print(f" [ERROR] Could not un-link file target {item}: {err}")
+                print(f"\nCompleted! Successfully wiped {deleted_count} file(s) from local filesystem arrays.")
+            else:
+                print("\nConfirmation entry mismatch! Operation aborted. Drive contents preserved.")
 
 if __name__ == "__main__":
-    args = sys.argv[1:]
+    if len(sys.argv) < 3:
+        print("Usage: rom-ck <path_to_dat_or_folder> <path_to_roms_dir> [--slow] [--thread [num_threads]] [--delete-null] [--purge] [--only-good] [--only-bad]")
+        sys.exit(1)
+
+    dat_input = sys.argv[1]
+    roms_input = sys.argv[2]
+    slow_flag = "--slow" in sys.argv
+    delete_null_flag = "--delete-null" in sys.argv
+    purge_flag = "--purge" in sys.argv
     
-    slow_flag = "--slow" in args
-    delete_null_flag = "--delete-null" in args
-    purge_flag = "--purge" in args
-    only_good_flag = "--only-good" in args
-    only_bad_flag = "--only-bad" in args
+    only_good_flag = "--only-good" in sys.argv
+    only_bad_flag = "--only-bad" in sys.argv
     
     if only_good_flag and only_bad_flag:
         print("Error: Cannot use --only-good and --only-bad at the same time.")
         sys.exit(1)
         
     threads = None
-    if "--thread" in args:
-        idx = args.index("--thread")
-        if idx + 1 < len(args) and args[idx + 1].isdigit():
-            threads = int(args[idx + 1])
+    if "--thread" in sys.argv:
+        idx = sys.argv.index("--thread")
+        if idx + 1 < len(sys.argv) and sys.argv[idx + 1].isdigit():
+            threads = int(sys.argv[idx + 1])
         else:
             threads = 0
-
-    save_cache_file = None
-    if "--save-cache" in args:
-        idx = args.index("--save-cache")
-        if idx + 1 < len(args):
-            save_cache_file = args[idx + 1]
-
-    use_cache_file = None
-    if "--use-cache" in args:
-        idx = args.index("--use-cache")
-        if idx + 1 < len(args):
-            use_cache_file = args[idx + 1]
-
-    # Filter out flags and parameter values to correctly identify positional arguments
-    positionals = []
-    skip_next = False
-    for i, arg in enumerate(args):
-        if skip_next:
-            skip_next = False
-            continue
-        if arg in ("--thread", "--save-cache", "--use-cache"):
-            if arg == "--thread":
-                if i + 1 < len(args) and args[i + 1].isdigit():
-                    skip_next = True
-            else:
-                if i + 1 < len(args):
-                    skip_next = True
-            continue
-        if arg.startswith("--"):
-            continue
-        positionals.append(arg)
-
-    # Contextual routing for positional argument rules
-    if use_cache_file:
-        if len(positionals) == 1:
-            dat_input = None
-            roms_input = positionals[0]
-        elif len(positionals) >= 2:
-            dat_input = positionals[0]
-            roms_input = positionals[1]
-        else:
-            print("Usage with --use-cache:\n  rom-ck <path_to_roms_dir> --use-cache <cache_db_path> [options]")
-            sys.exit(1)
-    else:
-        if len(positionals) < 2:
-            print("Usage:\n  rom-ck <path_to_dat_or_folder> <path_to_roms_dir> [options]")
-            print("\nOptions:\n  --slow\n  --thread [num_threads]\n  --delete-null\n  --purge\n  --only-good\n  --only-bad\n  --save-cache <path>\n  --use-cache <path>")
-            sys.exit(1)
-        dat_input = positionals[0]
-        roms_input = positionals[1]
 
     verify_roms(
         dat_path=dat_input,
@@ -635,7 +576,5 @@ if __name__ == "__main__":
         delete_null_mode=delete_null_flag,
         purge_mode=purge_flag,
         filter_good=only_good_flag,
-        filter_bad=only_bad_flag,
-        save_cache_path=save_cache_file,
-        use_cache_path=use_cache_file
+        filter_bad=only_bad_flag
     )
