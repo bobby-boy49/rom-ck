@@ -448,7 +448,7 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None, delete_nu
     report_path = os.path.join(report_dir, "rom_verification_report.txt")
     
     with open(report_path, "w") as f:
-        f.write(f"Recursive ROM Verification Report for: {roms_dir}\n")
+        f.write(f"ROM Verification Report for: {roms_dir}\n")
         if filter_good: 
             f.write("Filtered Mode: [GOOD DUMPS ONLY]\n")
         elif filter_bad: 
