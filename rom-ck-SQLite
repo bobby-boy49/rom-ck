@@ -262,15 +262,14 @@ def process_single_file(file_path, db_path, slow_mode):
                     for z_info in zip_infos:
                         inner_ext = os.path.splitext(z_info.filename)[1].lower()
                         inner_base_name = os.path.basename(z_info.filename)
+
+                        # Read the first 4 bytes dynamically for any file inside the zip
+                        with zf.open(z_info.filename, 'r') as f:
+                            magic = f.read(4)
                         
-                        inner_header_offset = 0
-                        if inner_ext in ['.nes', '.a78', '.lnx']:
-                            with zf.open(z_info.filename, 'r') as f:
-                                magic = f.read(4)
-                            inner_header_offset = get_header_offset_from_bytes(magic, inner_ext, z_info.file_size)
-                        else:
-                            inner_header_offset = get_header_offset_from_bytes(b'', inner_ext, z_info.file_size)
-                        
+                        # Let the offset function decide if this extension needs a header skip
+                        inner_header_offset = get_header_offset_from_bytes(magic, inner_ext, z_info.file_size)
+                                                
                         z_sha256, z_sha1, z_md5, z_is_zero = hash_zip_entry(zf, z_info, inner_header_offset)
                         
                         if z_is_zero:
