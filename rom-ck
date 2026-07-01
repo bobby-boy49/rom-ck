@@ -127,7 +127,7 @@ def get_header_offset_from_bytes(magic_4bytes, ext, file_size):
         if file_size % 0x2000 == 512:
             header_offset = 512
     elif ext == '.a78' and file_size > 128:
-        if magic_4bytes == b'ATARI':
+        if magic_4bytes == b'ATAR':
             header_offset = 128
     elif ext == '.lnx' and file_size > 64:
         if magic_4bytes == b'LYNX':
