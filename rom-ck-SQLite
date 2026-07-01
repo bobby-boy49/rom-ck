@@ -46,13 +46,32 @@ VALID_EXTENSIONS_SET = {ext.lower() for ext in VALID_EXTENSIONS}
 
 # PERFORMANCE OPTIMIZATION 2: Thread-local storage to prevent connection churning
 _thread_local = threading.local()
+_all_connections = []
+_connections_lock = threading.Lock()
 
 def _get_db_cursor(db_path):
     """Retrieves or creates a persistent SQLite cursor specialized for this thread."""
+    need_connect = False
     if not hasattr(_thread_local, "conn"):
-        _thread_local.conn = sqlite3.connect(db_path)
-        _thread_local.conn.execute("PRAGMA cache_size = -50000;")  # 50MB dedicated cache per thread
-        _thread_local.conn.execute("PRAGMA query_only = ON;")      # Read-only throughput optimization
+        need_connect = True
+    else:
+        # Check if the existing connection is still active/open
+        try:
+            _thread_local.conn.execute("SELECT 1;")
+        except (sqlite3.ProgrammingError, sqlite3.InterfaceError):
+            need_connect = True
+
+    if need_connect:
+        # check_same_thread=False allows the main thread to safely close this handle later
+        conn = sqlite3.connect(db_path, check_same_thread=False)
+        conn.execute("PRAGMA cache_size = -50000;")  # 50MB dedicated cache per thread
+        conn.execute("PRAGMA query_only = ON;")      # Read-only throughput optimization
+        _thread_local.conn = conn
+
+        # Track this connection globally
+        with _connections_lock:
+            _all_connections.append(conn)
+
     return _thread_local.conn.cursor()
 
 def parse_dats(dat_path, db_path="dat_cache.db"):
@@ -171,7 +190,7 @@ def get_header_offset_from_bytes(magic_4bytes, ext, file_size):
         if file_size % 0x2000 == 512:
             header_offset = 512
     elif ext == '.a78' and file_size > 128:
-        if magic_4bytes == b'ATAR':
+        if magic_4bytes == b'ATARI':
             header_offset = 128
     elif ext == '.lnx' and file_size > 64:
         if magic_4bytes == b'LYNX':
@@ -525,6 +544,14 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None, delete_nu
     print(f"Total Good Dumps: {good_dumps}")
     print(f"Total Bad/Unknown Dumps: {bad_dumps}")
     print(f"\nDone! Master report saved to: {report_path}")
+
+    with _connections_lock:
+        for conn in _all_connections:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        _all_connections.clear()
 
     if os.path.exists(db_path):
         try:
