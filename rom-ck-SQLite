@@ -182,53 +182,97 @@ def get_header_offset_from_bytes(magic_4bytes, ext, file_size):
 
     return header_offset
 
-def get_header_offset(file_path, ext, file_size):
-    with open(file_path, 'rb') as f:
-        magic = f.read(4)
-    return get_header_offset_from_bytes(magic, ext, file_size)
-
-def hash_rom(file_path, header_offset):
-    sha256_hash = hashlib.sha256()
+# INTEGRATED FIX A: Combined Single-Pass Hashing Engine for Loose Files
+def hash_rom(file_path, ext, file_size, slow_mode):
     sha1_hash = hashlib.sha1()
-    md5_hash = hashlib.md5()
+    sha256_hash = hashlib.sha256() if slow_mode else None
+    md5_hash = hashlib.md5() if slow_mode else None
     is_all_zero = True
 
     with open(file_path, 'rb') as f:
-        f.seek(header_offset)
+        # Read the first 4 magic bytes directly from this handle
+        magic = f.read(4)
+        header_offset = get_header_offset_from_bytes(magic, ext, file_size)
+
+        if header_offset > 0:
+            # File is headered; skip right past it seamlessly
+            f.seek(header_offset)
+        else:
+            # File is headerless; digest the initial bytes we already consumed
+            if magic:
+                if is_all_zero and any(magic):
+                    is_all_zero = False
+                sha1_hash.update(magic)
+                if slow_mode:
+                    sha256_hash.update(magic)
+                    md5_hash.update(magic)
+
         while True:
-            # PERFORMANCE OPTIMIZATION 3: Read in 1MB blocks rather than 64KB chunks
+            # Read in optimized 1MB block chunks
             chunk = f.read(1048576)
             if not chunk:
                 break
             if is_all_zero and any(chunk):
                 is_all_zero = False
-            sha256_hash.update(chunk)
             sha1_hash.update(chunk)
-            md5_hash.update(chunk)
+            if slow_mode:  # <-- Bypass heavy math in Fast Mode
+                sha256_hash.update(chunk)
+                md5_hash.update(chunk)
 
-    return sha256_hash.hexdigest(), sha1_hash.hexdigest(), md5_hash.hexdigest(), is_all_zero
+    return (
+        sha256_hash.hexdigest() if slow_mode else None,
+        sha1_hash.hexdigest(),
+        md5_hash.hexdigest() if slow_mode else None,
+        is_all_zero,
+        header_offset
+    )
 
-def hash_zip_entry(zf, zip_info, header_offset):
-    sha256_hash = hashlib.sha256()
+# INTEGRATED FIX B: Combined Single-Pass Hashing Engine for Compressed Zip Streams
+def hash_zip_entry(zf, zip_info, inner_ext, slow_mode):
     sha1_hash = hashlib.sha1()
-    md5_hash = hashlib.md5()
+    sha256_hash = hashlib.sha256() if slow_mode else None
+    md5_hash = hashlib.md5() if slow_mode else None
     is_all_zero = True
 
     with zf.open(zip_info.filename, 'r') as f:
+        # Read the first 4 magic bytes directly out of the active decompressed stream
+        magic = f.read(4)
+        header_offset = get_header_offset_from_bytes(magic, inner_ext, zip_info.file_size)
+
         if header_offset > 0:
-            f.read(header_offset)
+            # Streams can't seek backward; read out the remainder of the header block to discard it
+            remaining_header = header_offset - len(magic)
+            if remaining_header > 0:
+                f.read(remaining_header)
+        else:
+            # Headerless; feed the magic bytes into the hash engine
+            if magic:
+                if is_all_zero and any(magic):
+                    is_all_zero = False
+                sha1_hash.update(magic)
+                if slow_mode:
+                    sha256_hash.update(magic)
+                    md5_hash.update(magic)
+
         while True:
-            # PERFORMANCE OPTIMIZATION 3: Read in 1MB blocks rather than 64KB chunks
+            # Read in optimized 1MB block chunks
             chunk = f.read(1048576)
             if not chunk:
                 break
             if is_all_zero and any(chunk):
                 is_all_zero = False
-            sha256_hash.update(chunk)
             sha1_hash.update(chunk)
-            md5_hash.update(chunk)
+            if slow_mode:  # <-- Bypass heavy math in Fast Mode
+                sha256_hash.update(chunk)
+                md5_hash.update(chunk)
 
-    return sha256_hash.hexdigest(), sha1_hash.hexdigest(), md5_hash.hexdigest(), is_all_zero
+    return (
+        sha256_hash.hexdigest() if slow_mode else None,
+        sha1_hash.hexdigest(),
+        md5_hash.hexdigest() if slow_mode else None,
+        is_all_zero,
+        header_offset
+    )
 
 def audit_hashes(cursor, sha256, sha1, md5, slow_mode):
     matched_entries = []
@@ -286,22 +330,16 @@ def process_single_file(file_path, db_path, slow_mode):
                     inner_ext = os.path.splitext(z_info.filename)[1].lower()
                     inner_base_name = os.path.basename(z_info.filename)
 
-                    # Read the first 4 bytes dynamically for any file inside the zip
-                    with zf.open(z_info.filename, 'r') as f:
-                        magic = f.read(4)
-
-                    # Let the offset function decide if this extension needs a header skip
-                    inner_header_offset = get_header_offset_from_bytes(magic, inner_ext, z_info.file_size)
-
-                    z_sha256, z_sha1, z_md5, z_is_zero = hash_zip_entry(zf, z_info, inner_header_offset)
+                    # INTEGRATED FIX C: Executing streamlined single-open ZIP entry stream handler
+                    z_sha256, z_sha1, z_md5, z_is_zero, inner_header_offset = hash_zip_entry(zf, z_info, inner_ext, slow_mode)
 
                     if z_is_zero:
                         entry_line = f"  -> Inside Zip: {z_info.filename}"
                         lines.extend([
                             entry_line,
                             f"     SHA-1:  {z_sha1}",
-                            f"     MD5:    {z_md5}",
-                            f"     SHA-256:{z_sha256}",
+                            f"     MD5:    {z_md5 if slow_mode else 'N/A (Fast Mode)'}",
+                            f"     SHA-256:{z_sha256 if slow_mode else 'N/A (Fast Mode)'}",
                             "     RESULT: [BAD/GHOST DUMP] Error: File payload consists entirely of blank null zeroes.",
                             "     " + "." * 30
                         ])
@@ -317,8 +355,8 @@ def process_single_file(file_path, db_path, slow_mode):
                         entry_line += " (Headerless)"
                     lines.append(entry_line)
                     lines.append(f"     SHA-1:  {z_sha1}")
-                    lines.append(f"     MD5:    {z_md5}")
-                    lines.append(f"     SHA-256:{z_sha256}")
+                    lines.append(f"     MD5:    {z_md5 if slow_mode else 'N/A (Fast Mode)'}")
+                    lines.append(f"     SHA-256:{z_sha256 if slow_mode else 'N/A (Fast Mode)'}")
 
                     if matched_entries:
                         good_entries += 1
@@ -365,16 +403,17 @@ def process_single_file(file_path, db_path, slow_mode):
     # --- STANDARD / EXTRACTED FILE LIFECYCLE ---
     else:
         file_size = os.path.getsize(file_path)
-        header_offset = get_header_offset(file_path, ext, file_size)
-        sha256, sha1, md5, is_zero = hash_rom(file_path, header_offset)
+
+        # INTEGRATED FIX C: Executing combined single-open loose filesystem file handler
+        sha256, sha1, md5, is_zero, header_offset = hash_rom(file_path, ext, file_size, slow_mode)
 
         if is_zero:
             lines = [
                 f"File: {file_name}",
                 f"  Header Status: {'Headered' if header_offset > 0 else 'Headerless'}",
                 f"  SHA-1:  {sha1}",
-                f"  MD5:    {md5}",
-                f"  SHA-256:{sha256}",
+                f"  MD5:    {md5 if slow_mode else 'N/A (Fast Mode)'}",
+                f"  SHA-256:{sha256 if slow_mode else 'N/A (Fast Mode)'}",
                 "  RESULT: [BAD/GHOST DUMP] Error: File payload consists entirely of blank null zeroes.",
                 "-" * 50
             ]
@@ -423,8 +462,8 @@ def process_single_file(file_path, db_path, slow_mode):
             lines.append("  Header Status: Headerless")
         lines.extend([
             f"  SHA-1:  {sha1}",
-            f"  MD5:    {md5}",
-            f"  SHA-256:{sha256}",
+            f"  MD5:    {md5 if slow_mode else 'N/A (Fast Mode)'}",
+            f"  SHA-256:{sha256 if slow_mode else 'N/A (Fast Mode)'}",
             f"  RESULT: {result}",
             "-" * 50
         ])
