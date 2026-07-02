@@ -227,7 +227,7 @@ def hash_rom(file_path, ext, file_size, slow_mode):
     is_all_zero = True
 
     with open(file_path, 'rb') as f:
-        # Read up to the first 5 magic bytes directly from this handle to support ATARI validation
+        # Read up to the first 4 magic bytes
         magic = f.read(4)
         header_offset = get_header_offset_from_bytes(magic, ext, file_size)
 
