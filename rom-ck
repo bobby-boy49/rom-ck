@@ -239,7 +239,7 @@ def hash_zip_entry(zf, zip_info, inner_ext, slow_mode):
     is_all_zero = True
 
     with zf.open(zip_info.filename, 'r') as f:
-        # Read up to the first 5 magic bytes directly out of the active decompressed stream
+        # Read up to the first 4 magic bytes directly out of the active decompressed stream
         magic = f.read(4)
         header_offset = get_header_offset_from_bytes(magic, inner_ext, zip_info.file_size)
 
