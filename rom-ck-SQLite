@@ -53,8 +53,8 @@ def _get_db_cursor(db_path):
         # CRITICAL FIX: Storing BOTH the connection and the cursor in thread-local storage
         # prevents Python's garbage collector from closing the database mid-run.
         _thread_local.conn = sqlite3.connect(db_path)
-        _thread_local.conn.execute("PRAGMA cache_size = -50000;")  # 50MB dedicated cache per thread [cite: 6]
-        _thread_local.conn.execute("PRAGMA query_only = ON;")      # Read-only throughput optimization [cite: 6, 7]
+        _thread_local.conn.execute("PRAGMA cache_size = -50000;")  # 50MB dedicated cache per thread
+        _thread_local.conn.execute("PRAGMA query_only = ON;")      # Read-only throughput optimization
         _thread_local.cursor = _thread_local.conn.cursor()
     return _thread_local.cursor
 
@@ -73,7 +73,7 @@ def parse_dats(dat_path, db_path="dat_cache.db"):
     cursor.execute("PRAGMA synchronous = OFF;")
     cursor.execute("PRAGMA journal_mode = MEMORY;")
     cursor.execute("PRAGMA temp_store = MEMORY;")
-    cursor.execute("PRAGMA cache_size = -100000;")  # 100MB RAM workspace for rapid sorting [cite: 8]
+    cursor.execute("PRAGMA cache_size = -100000;")  # 100MB RAM workspace for rapid sorting
 
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS roms (
