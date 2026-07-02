@@ -1,10 +1,10 @@
 # Old need to update the hashes.
 MD5
-40a533c6511b47a7f3f540bb9b43050a  rom-ck 22 KB
+40a533c6511b47a7f3f540bb9b43050a  rom-ck 22.9 KB
 SHA-1
-c42ece65fd48832b789c0965f04159d5ea56e842  rom-ck 22 KB
+c42ece65fd48832b789c0965f04159d5ea56e842  rom-ck 22.9 KB
 SHA-256
-8b5f94175d65b980ac6e0d05b73c2f2f5ed84be19a315e9ef6f7eb4a5a7adf15  rom-ck 22 KB
+8b5f94175d65b980ac6e0d05b73c2f2f5ed84be19a315e9ef6f7eb4a5a7adf15  rom-ck 22.9 KB
 
 MD5
 b6ad9439d3f454ec218309d0e4edfa92  rom-ck-SQLite 26.2 KB
