@@ -17,13 +17,14 @@ VALID_EXTENSIONS = (
 
     # --- Nintendo ---
     '.z64', '.v64', '.n64', '.rom',  # Nintendo 64
+    '.sfc', '.smc', '.fig', '.swc',  # SNES
     '.gba', '.gbc', '.gb',           # Game Boy, Color, Advance
-    '.nes', '.sfc', '.smc',          # NES / SNES
     '.nds', '.3ds',                  # Nintendo DS / 3DS
+    '.nes',                          # NES
     '.iso',                          # GameCube / Wii (Raw Discs)
 
     # --- Sega ---
-    '.md', '.bin', '.gen',           # Genesis / Mega Drive
+    '.md', '.smd', '.bin', '.gen',   # Genesis / Mega Drive
     '.32x',                          # Sega 32X
     '.sms',                          # Sega Master System
     '.gg',                           # Sega Game Gear
@@ -204,8 +205,8 @@ def get_header_offset_from_bytes(magic_bytes, ext, file_size):
     if ext == '.nes' and file_size > 16:
         if magic_bytes[:4] == b'NES\x1a':
             header_offset = 16
-    elif ext == '.smc':
-        if file_size % 0x2000 == 512:
+    elif ext in ['.smc', '.sfc', '.fig', '.swc']:
+        if file_size % 1024 == 512:
             header_offset = 512
     elif ext == '.a78' and file_size > 128:
         if magic_bytes[:4] == b'ATAR':
@@ -213,8 +214,17 @@ def get_header_offset_from_bytes(magic_bytes, ext, file_size):
     elif ext == '.lnx' and file_size > 64:
         if magic_bytes[:4] == b'LYNX':
             header_offset = 64
-    elif ext in ['.sms', '.gg']:
-        if file_size % 0x4000 == 512:
+    elif ext in ['.sms', '.gg', '.pce']:
+        if file_size % 1024 == 512:
+            header_offset = 512
+    elif ext in ['.smd', '.bin', '.md', '.gen', '.32x'] and file_size > 512:
+        if magic_bytes[:3] == b'\xaa\xbb\x06' or magic_bytes[:2] == b'\x5e\x03':
+            header_offset = 512
+    elif ext in ['.gb', '.gbc', '.gba']:
+        if file_size % 1024 == 512:
+            header_offset = 512
+    elif ext in ['.ngp', '.ngc', '.ws', '.wsc']:
+        if file_size % 1024 == 512:
             header_offset = 512
 
     return header_offset
