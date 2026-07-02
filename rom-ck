@@ -217,7 +217,7 @@ def get_header_offset_from_bytes(magic_bytes, ext, file_size):
     elif ext in ['.sms', '.gg', '.pce']:
         if file_size % 1024 == 512:
             header_offset = 512
-    elif ext in ['.smd', '.bin', '.md', '.gen', '.32x'] and file_size > 512:
+    elif ext in ['.smd', '.md', '.gen', '.32x'] and file_size > 512:
         if magic_bytes[:3] == b'\xaa\xbb\x06' or magic_bytes[:2] == b'\x5e\x03':
             header_offset = 512
     elif ext in ['.gb', '.gbc', '.gba']:
