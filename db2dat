@@ -70,7 +70,7 @@ def stream_db_to_dat(db_path, output_dat):
         f.write('</datafile>')
 
     conn.close()
-    print(f"Successfully exported to {output_dat}. All character constraints satisfied.")
+    print(f"Successfully exported to {output_dat}.")
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
