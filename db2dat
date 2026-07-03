@@ -2,6 +2,7 @@
 import sqlite3
 import sys
 import os
+from xml.sax.saxutils import escape
 
 def stream_db_to_dat(db_path, output_dat):
     if not os.path.exists(db_path):
@@ -15,7 +16,6 @@ def stream_db_to_dat(db_path, output_dat):
 
     print(f"Writing to {output_dat} (Streaming)...")
 
-    # Using direct text streaming to keep memory usage at constant low levels
     with open(output_dat, 'w', encoding='utf-8') as f:
         f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
         f.write('<!DOCTYPE datafile PUBLIC "-//Logiqx//DTD ROM Management Datafile//EN" "http://www.logiqx.com/Dats/datafile.dtd">\n')
@@ -31,38 +31,41 @@ def stream_db_to_dat(db_path, output_dat):
 
         for row in cursor:
             game_name, rom_name, sha256, sha1, md5 = row
+            
+            # Escape strings to be XML-safe
+            safe_game = escape(game_name)
+            safe_rom = escape(rom_name) if rom_name else f"{safe_game}.rom"
+            
+            # Escape hash strings just in case
+            s_sha256 = escape(sha256) if sha256 else None
+            s_sha1 = escape(sha1) if sha1 else None
+            s_md5 = escape(md5) if md5 else None
 
             if game_name != current_game_name:
                 if current_game_name is not None:
                     f.write('    </game>\n')
-                f.write(f'    <game name="{game_name}">\n')
-                f.write(f'        <description>{game_name}</description>\n')
+                f.write(f'    <game name="{safe_game}">\n')
+                f.write(f'        <description>{safe_game}</description>\n')
                 current_game_name = game_name
 
-            # Build the ROM entry line
-            r_name = rom_name if rom_name else f"{game_name}.rom"
-            f.write(f'        <rom name="{r_name}"')
-            
-            if sha256:
-                f.write(f' sha256="{sha256}"')
-            if sha1:
-                f.write(f' sha1="{sha1}"')
-            if md5:
-                f.write(f' md5="{md5}"')
-                
+            f.write(f'        <rom name="{safe_rom}"')
+            if s_sha256:
+                f.write(f' sha256="{s_sha256}"')
+            if s_sha1:
+                f.write(f' sha1="{s_sha1}"')
+            if s_md5:
+                f.write(f' md5="{s_md5}"')
             f.write('/>\n')
 
         if current_game_name is not None:
             f.write('    </game>\n')
-        
         f.write('</datafile>')
 
     conn.close()
-    print("Export complete!")
+    print(f"Successfully exported to {output_dat}.")
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         print("Usage: db2dat <input.db> <output.dat>")
         sys.exit(1)
-        
     stream_db_to_dat(sys.argv[1], sys.argv[2])
