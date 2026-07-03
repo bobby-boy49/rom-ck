@@ -648,8 +648,20 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None, delete_nu
                 print("\nConfirmation entry mismatch! Operation aborted. Drive contents preserved.")
 
 if __name__ == "__main__":
+    # 1. Check if the user just wants to build the cache
+    if "--build-cache" in sys.argv:
+        if len(sys.argv) < 2 or sys.argv[1] == "--build-cache":
+             print("Usage: rom-ck <path_to_dat_or_folder> --build-cache")
+             sys.exit(1)
+
+        dat_input = sys.argv[1]
+        print("Build-Cache mode activated. Processing DAT files...")
+        parse_dats(dat_input)
+        print("Cache successfully built and saved to disk. Exiting.")
+        sys.exit(0)
+
     if len(sys.argv) < 3:
-        print("Usage: rom-ck <path_to_dat_folder_or_db> <path_to_roms_dir> [--slow] [--thread [num_threads]] [--delete-null] [--purge] [--only-good] [--only-bad]")
+        print("Usage: rom-ck <path_to_dat_folder_or_db> <path_to_roms_dir> [--slow] [--thread [num_threads]] [--delete-null] [--purge] [--only-good] [--only-bad] [--build-cache]")
         sys.exit(1)
 
     dat_input = sys.argv[1]
