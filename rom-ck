@@ -71,6 +71,11 @@ def compute_dat_state_hash(dat_files):
     return hashlib.sha256("\n".join(state_desc).encode('utf-8')).hexdigest()
 
 def parse_dats(dat_path, db_path="dat_cache.db"):
+
+    if os.path.isfile(dat_path) and dat_path.lower().endswith('.db'):
+        print(f"Using pre-existing SQLite database cache directly: {dat_path}")
+        return dat_path
+
     # 1. Discover all current DAT targets
     dat_files = []
     if os.path.isdir(dat_path):
@@ -644,7 +649,7 @@ def verify_roms(dat_path, roms_dir, slow_mode=False, max_threads=None, delete_nu
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Usage: rom-ck <path_to_dat_or_folder> <path_to_roms_dir> [--slow] [--thread [num_threads]] [--delete-null] [--purge] [--only-good] [--only-bad]")
+        print("Usage: rom-ck <path_to_dat_folder_or_db> <path_to_roms_dir> [--slow] [--thread [num_threads]] [--delete-null] [--purge] [--only-good] [--only-bad]")
         sys.exit(1)
 
     dat_input = sys.argv[1]
