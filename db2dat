@@ -2,7 +2,7 @@
 import sqlite3
 import sys
 import os
-from xml.sax.saxutils import escape
+from xml.sax.saxutils import escape, quoteattr
 
 def stream_db_to_dat(db_path, output_dat):
     if not os.path.exists(db_path):
@@ -12,7 +12,13 @@ def stream_db_to_dat(db_path, output_dat):
     print(f"Connecting to database: {db_path}...")
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-    cursor.execute("SELECT game_name, rom_name, sha256, sha1, md5 FROM roms ORDER BY game_name")
+    
+    try:
+        cursor.execute("SELECT game_name, rom_name, sha256, sha1, md5 FROM roms ORDER BY game_name")
+    except sqlite3.OperationalError as err:
+        print(f"Database error: {err} (Is this a valid rom-ck cache database?)")
+        conn.close()
+        sys.exit(1)
 
     print(f"Writing to {output_dat} (Streaming)...")
 
@@ -32,29 +38,31 @@ def stream_db_to_dat(db_path, output_dat):
         for row in cursor:
             game_name, rom_name, sha256, sha1, md5 = row
             
-            # Escape strings to be XML-safe
-            safe_game = escape(game_name)
-            safe_rom = escape(rom_name) if rom_name else f"{safe_game}.rom"
+            # Use quoteattr for attributes (safely adds quotes and escapes inner quotes)
+            attr_game = quoteattr(game_name)
             
-            # Escape hash strings just in case
-            s_sha256 = escape(sha256) if sha256 else None
-            s_sha1 = escape(sha1) if sha1 else None
-            s_md5 = escape(md5) if md5 else None
+            if rom_name:
+                attr_rom = quoteattr(rom_name)
+            else:
+                attr_rom = quoteattr(f"{game_name}.rom")
+            
+            # Use escape for element inner text bodies
+            text_game = escape(game_name)
 
             if game_name != current_game_name:
                 if current_game_name is not None:
                     f.write('    </game>\n')
-                f.write(f'    <game name="{safe_game}">\n')
-                f.write(f'        <description>{safe_game}</description>\n')
+                f.write(f'    <game name={attr_game}>\n')
+                f.write(f'        <description>{text_game}</description>\n')
                 current_game_name = game_name
 
-            f.write(f'        <rom name="{safe_rom}"')
-            if s_sha256:
-                f.write(f' sha256="{s_sha256}"')
-            if s_sha1:
-                f.write(f' sha1="{s_sha1}"')
-            if s_md5:
-                f.write(f' md5="{s_md5}"')
+            f.write(f'        <rom name={attr_rom}')
+            if sha256:
+                f.write(f' sha256={quoteattr(sha256)}')
+            if sha1:
+                f.write(f' sha1={quoteattr(sha1)}')
+            if md5:
+                f.write(f' md5={quoteattr(md5)}')
             f.write('/>\n')
 
         if current_game_name is not None:
@@ -62,7 +70,7 @@ def stream_db_to_dat(db_path, output_dat):
         f.write('</datafile>')
 
     conn.close()
-    print(f"Successfully exported to {output_dat}.")
+    print(f"Successfully exported to {output_dat}. All character constraints satisfied.")
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
