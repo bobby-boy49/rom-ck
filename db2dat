@@ -2,88 +2,67 @@
 import sqlite3
 import sys
 import os
-import xml.etree.ElementTree as ET
-import xml.dom.minidom
 
-def export_db_to_dat(db_path, output_dat):
+def stream_db_to_dat(db_path, output_dat):
     if not os.path.exists(db_path):
         print(f"Error: Database file '{db_path}' not found.")
         sys.exit(1)
 
-    print(f"Reading database: {db_path}...")
+    print(f"Connecting to database: {db_path}...")
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-
-    # Retrieve and group ROMs alphabetically by game_name
     cursor.execute("SELECT game_name, rom_name, sha256, sha1, md5 FROM roms ORDER BY game_name")
-    rows = cursor.fetchall()
 
-    if not rows:
-        print("Database is empty or invalid.")
-        sys.exit(1)
+    print(f"Writing to {output_dat} (Streaming)...")
 
-    print(f"Found {len(rows)} ROM entries. Reconstructing XML tree...")
+    # Using direct text streaming to keep memory usage at constant low levels
+    with open(output_dat, 'w', encoding='utf-8') as f:
+        f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
+        f.write('<!DOCTYPE datafile PUBLIC "-//Logiqx//DTD ROM Management Datafile//EN" "http://www.logiqx.com/Dats/datafile.dtd">\n')
+        f.write('<datafile>\n')
+        f.write('    <header>\n')
+        f.write('        <name>Exported Database Cache</name>\n')
+        f.write(f'        <description>Exported from {os.path.basename(db_path)}</description>\n')
+        f.write('        <version>1.0</version>\n')
+        f.write('        <author>rom-ck streaming exporter</author>\n')
+        f.write('    </header>\n')
 
-    # Build standard Logiqx XML structure
-    datafile = ET.Element('datafile')
+        current_game_name = None
 
-    header = ET.SubElement(datafile, 'header')
-    ET.SubElement(header, 'name').text = "Exported Database Cache"
-    ET.SubElement(header, 'description').text = f"Exported from {os.path.basename(db_path)}"
-    ET.SubElement(header, 'version').text = "1.0"
-    ET.SubElement(header, 'author').text = "rom-ck exporter"
+        for row in cursor:
+            game_name, rom_name, sha256, sha1, md5 = row
 
-    current_game_elem = None
-    current_game_name = None
+            if game_name != current_game_name:
+                if current_game_name is not None:
+                    f.write('    </game>\n')
+                f.write(f'    <game name="{game_name}">\n')
+                f.write(f'        <description>{game_name}</description>\n')
+                current_game_name = game_name
 
-    for row in rows:
-        game_name, rom_name, sha256, sha1, md5 = row
+            # Build the ROM entry line
+            r_name = rom_name if rom_name else f"{game_name}.rom"
+            f.write(f'        <rom name="{r_name}"')
+            
+            if sha256:
+                f.write(f' sha256="{sha256}"')
+            if sha1:
+                f.write(f' sha1="{sha1}"')
+            if md5:
+                f.write(f' md5="{md5}"')
+                
+            f.write('/>\n')
 
-        # Create a new <game> node whenever the game name changes
-        if game_name != current_game_name:
-            # We use 'game' as the standard tag, though MAME sets sometimes use 'machine'
-            current_game_elem = ET.SubElement(datafile, 'game', name=game_name)
-            ET.SubElement(current_game_elem, 'description').text = game_name
-            current_game_name = game_name
-
-        rom_attrs = {}
-
-        # Handle the O(1) database optimization where standard extensions were stripped
-        if rom_name:
-            rom_attrs['name'] = rom_name
-        else:
-            # If the database stripped the name because it was a standard match,
-            # we assign a generic '.rom' extension so ROM managers don't throw errors.
-            rom_attrs['name'] = f"{game_name}.rom"
-
-        if sha256:
-            rom_attrs['sha256'] = sha256
-        if sha1:
-            rom_attrs['sha1'] = sha1
-        if md5:
-            rom_attrs['md5'] = md5
-
-        ET.SubElement(current_game_elem, 'rom', **rom_attrs)
+        if current_game_name is not None:
+            f.write('    </game>\n')
+        
+        f.write('</datafile>')
 
     conn.close()
-    print(f"Formatting and writing to {output_dat}...")
-
-    # Format the XML with nice indentation
-    xmlstr = xml.dom.minidom.parseString(ET.tostring(datafile)).toprettyxml(indent="    ")
-
-    # Inject the Logiqx DOCTYPE header that ROM managers look for
-    doctype = '<!DOCTYPE datafile PUBLIC "-//Logiqx//DTD ROM Management Datafile//EN" "http://www.logiqx.com/Dats/datafile.dtd">\n'
-    xmlstr = xmlstr.replace('<?xml version="1.0" ?>', f'<?xml version="1.0"?>\n{doctype}')
-
-    # Write out the final file
-    with open(output_dat, 'w', encoding='utf-8') as f:
-        f.write(xmlstr)
-
     print("Export complete!")
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         print("Usage: db2dat <input.db> <output.dat>")
         sys.exit(1)
-
-    export_db_to_dat(sys.argv[1], sys.argv[2])
+        
+    stream_db_to_dat(sys.argv[1], sys.argv[2])
