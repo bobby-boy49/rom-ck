@@ -487,8 +487,11 @@ def process_single_file(file_path, db_path, slow_mode):
                 entry = matched_entries[0]
                 if isinstance(entry, tuple):
                     g_name, r_name = entry
-                    # EXTENSION FIX: Avoid string mutation/truncation bugs on layout mappings
-                    target_name = r_name if r_name else f"{g_name}{ext}"
+                    # Ensure the target name uses a valid ROM extension; otherwise, fall back to the clean game name + original extension
+                    if r_name and os.path.splitext(r_name)[1].lower() in VALID_EXTENSIONS_SET:
+                        target_name = r_name
+                    else:
+                        target_name = f"{g_name}{ext}"
                     if r_name and r_name.lower() == file_name.lower():
                         result = f"[GOOD DUMP] Matches: {g_name} {match_tag} {r_name}] via {method}"
                     else:
