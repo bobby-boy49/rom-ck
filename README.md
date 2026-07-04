@@ -8,18 +8,45 @@ Here is a Gemini list of features!
 
 ## Features
 
-- **High-Performance DAT Parsing**: Utilizes memory-efficient streaming to clear XML DOM nodes on the fly. This allows the script to ingest massive, multi-gigabyte DAT databases (e.g., MAME, Redump, No-Intro) without ballooning system RAM.
-- **Console Header Awareness (Pre-Computed Stripping)**: Automatically detects and bypasses system-specific copier/emulator headers (such as 16-byte iNES headers for `.nes` or 512-byte SMC headers for `.smc`). Hashes are computed strictly against the pure game data payload for 100% accurate database matching.
-- **Deep-Audit Multi-Hash Matching**:
-  - **Fast Mode (Sequential)**: Uses highly-optimized `SHA-1` indexing as a high-speed anchor lookup.
-  - **Slow Mode (Deep Audit)**: Provides robust cross-verification using strict `SHA-256` matching with automatic graceful fallbacks to `SHA-1` and `MD5` if needed.
-- **Container / Zip Parsing Lifecycle**: Extracts, maps, and validates individual compressed game ROMs inside `.zip` archives without requiring full manual disk extraction.
-- **Ghost Dump Detection**: Pre-emptively scans data chunks during hashing to isolate broken, fake, or corrupted files whose data payloads consist strictly of empty `0x00` null bytes.
-- **Output & Report Isolation Filters**: Includes granular tracking flags (`--only-good` and `--only-bad`) to tailor your console outputs and generated summary logs:
-  - `--only-good`: Displays and logs exclusively verified healthy dumps.
-  - `--only-bad`: Transforms the script into an error monitor, hiding passing files to expose only unknown, corrupted, or ghost dumps.
-- **Dynamic Asynchronous Progress Tracking**: Built-in thread-safe job completion architecture accurately updates real-time execution statistics (`[Current / Total]`) across multi-threaded operations even when hidden files are omitted by active output filters.
-- **Hardware-Accelerated Concurrency**: Leverages a multi-threaded parallel workspace to audit thousands of files simultaneously across available CPU architectures.
-- **Safe Automated Purge Engine**: Features target queues (`--delete-null` and `--purge`) paired with a clear-text terminal confirmation safe-guard (`"Yes, do as I say!"`) to permanently scrub unmapped or corrupted binaries from filesystem arrays safely.
+### 🔍 Core Architecture & Platform Support
+* **Multi-System Compatibility:** Pre-configured with a master validation list supporting a wide range of extensions across Nintendo, Sega, Atari, SNK, Bandai, NEC, and arcade platforms[cite: 1].
+* **Dual-Format DAT Intake:** Accepts raw `.dat` XML files, recursively scans directories containing multiple DAT targets, or loads a pre-existing SQLite database cache directly.
+* **Intelligent Header Logic:** Automatically identifies and strips system-specific headers (e.g., NES, SNES, Sega, Atari) to calculate accurate headerless hashes.
+
+### ⚡ Performance & Caching Optimizations
+* **Dynamic Cache Validation:** Tracks DAT file changes using a unique `SHA-256` state hash to skip rebuilding the database cache if nothing has modified.
+* **High-Throughput SQLite Engine:** Rebuilds fresh database caches using highly optimized write-time parameters (`PRAGMA synchronous = OFF`, `journal_mode = MEMORY`) and large dedicated RAM workspaces.
+* **Multi-Threaded Parallel Execution:** Employs an asynchronous `ThreadPoolExecutor` to process files concurrently utilizing maximum hardware capacity.
+* **Safe Storage Handlers:** Features thread-local database connections to prevent connection churning mid-run, alongside an explicit fallback to sequential processing to protect fragile storage media like SD cards.
+* **Single-Pass Stream Hashing:** Minimizes I/O overhead by opening loose files and compressed zip entries exactly once, reading data in optimized 1MB chunks to feed multiple hash engines simultaneously.
+
+### 🛡️ Audit Capabilities & Integrity Analysis
+* **Dual Audit Processing Modes:**
+  * **Fast Mode (Default):** Runs a quick, optimized evaluation utilizing a `SHA-1` index anchor.
+  * **Slow Mode:** Executes a deep cryptographic audit anchoring to `SHA-256` with automated fallbacks to `SHA-1` and `MD5`.
+* **Deep Zip Archive Inspection:** Drills down into `.zip` containers on the fly to authenticate individual sub-files against standard entries, shared BIOS files, or driver variations without requiring extraction to disk.
+* **Ghost Dump Identification:** Automatically flags corrupt, broken, or fake "ghost" dumps whose contents consist entirely of empty null zeroes.
+
+### 🎛️ Automation, Filtering & Safety Actions
+* **Tailored System Reporting:** Automatically outputs a comprehensive `rom_verification_report.txt` breaking down good, bad, and unmapped variants with explicit audit summaries.
+* **Console Filtering Switches:** Tweak terminal noise by instructing the engine to print and log only verified dumps (`--only-good`) or bad/unknown entries (`--only-bad`).
+* **Destructive Clean-up Protections:** Includes strict switches to wipe empty dummy files (`--delete-null`) or completely clear out invalid dumps (`--purge`).
+* **Interactive Guardrail:** Destructive disk processes require an explicit, un-bypassable terminal confirmation: `"Yes, do as I say!"`.
+
+---
+
+## Command Line Flags
+
+| Flag | Description |
+| :--- | :--- |
+| `path_to_dat_folder_or_db` | **(Required)** Path to your system `.dat` file, folder of DATs, or pre-built `.db` cache. |
+| `path_to_roms_dir` | **(Required)** Path to the directory or single file containing the ROMs you want to verify. |
+| `--slow` | Deep Audit Mode. Force checks all hashes (`SHA-256`, `SHA-1`, `MD5`) instead of just `SHA-1`. |
+| `--thread [n]` | Multi-threaded mode. Set a manual thread worker pool or use `0` to maximize available system CPU power. |
+| `--only-good` | Filters console logging and reporting outputs to exclusively show verified good dumps. |
+| `--only-bad` | Filters console logging and reporting outputs to exclusively show broken/unmapped dumps. |
+| `--delete-null` | Targets and queues entirely zeroed-out "ghost" dumps for local filesystem deletion. |
+| `--purge` | Queues all unmapped, bad, or corrupt files for total filesystem deletion. |
+| `--build-cache` | Standalone flag. Builds the SQLite database cache from your DAT files and exits immediately without running an audit. |
 
 PS. If you don't like AI you don't have to use it. Or read the slop above. But the reason I conjured this up is because I, for one was bored and number two, I wanted someting that I could just throw some dat files and some roms at and be done with it. If I had to be honest I am not proud of it either. But I wanted something that works and works relatively well and just did what I wanted it to do. And that's what this is!
