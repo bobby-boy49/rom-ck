@@ -9,7 +9,7 @@ Here is a Gemini list of features!
 ## Features
 
 ### 🔍 Core Architecture & Platform Support
-* **Multi-System Compatibility:** Pre-configured with a master validation list supporting a wide range of extensions across Nintendo, Sega, Atari, SNK, Bandai, NEC, and arcade platforms[cite: 1].
+* **Multi-System Compatibility:** Pre-configured with a master validation list supporting a wide range of extensions across Nintendo, Sega, Atari, SNK, Bandai, NEC, and arcade platforms.
 * **Dual-Format DAT Intake:** Accepts raw `.dat` XML files, recursively scans directories containing multiple DAT targets, or loads a pre-existing SQLite database cache directly.
 * **Intelligent Header Logic:** Automatically identifies and strips system-specific headers (e.g., NES, SNES, Sega, Atari) to calculate accurate headerless hashes.
 
