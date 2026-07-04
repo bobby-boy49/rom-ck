@@ -4,8 +4,6 @@ Here are some dat [files](https://files.catbox.moe/a0nmpf.zip).
 
 ![](demo.gif)
 
-Here is a Gemini list of features!
-
 ## Features
 
 ### 🔍 Core Architecture & Platform Support
