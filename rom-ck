@@ -166,8 +166,8 @@ def parse_dats(dat_path, db_path="dat_cache.db"):
                             rom_lower = rom_file_name.lower()
                             game_lower = current_game.lower()
 
-                            # PERFORMANCE OPTIMIZATION 1: O(1) split check bypasses the old nested extension loop
-                            if rom_lower.startswith(game_lower) and rom_lower[len(game_lower):] in VALID_EXTENSIONS_SET:
+                            # PERFORMANCE OPTIMIZATION 1: O(1) split check bypasses nested loops and handles naked/exact names from exporters
+                            if rom_lower == game_lower or (rom_lower.startswith(game_lower) and rom_lower[len(game_lower):] in VALID_EXTENSIONS_SET):
                                 has_custom_name = False
 
                         db_rom_name = rom_file_name if (rom_file_name and has_custom_name) else None
