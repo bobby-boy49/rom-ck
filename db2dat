@@ -26,7 +26,7 @@ def stream_db_to_dat(db_path, output_dat):
         conn.close()
         sys.exit(1)
 
-    print(f"Writing to {output_dat} (Streaming layout)...")
+    print(f"Writing to {output_dat} (Streaming)...")
 
     with open(output_dat, 'w', encoding='utf-8') as f:
         f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
