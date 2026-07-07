@@ -720,7 +720,7 @@ if __name__ == "__main__":
         sys.exit(0)
 
     if len(sys.argv) < 3:
-        print("Usage: rom-ck <path_to_dat_folder_or_db> <path_to_roms_dir> [--slow] [--thread [num_threads]] [--delete-null] [--purge] [--only-good] [--only-bad] [--build-cache] [--rename]")
+        print("Usage: rom-ck <path_to_dat_folder_or_db> <path_to_roms_dir> [--slow] [--thread [num_threads]] [--delete-null] [--purge] [--only-good] [--only-bad] [--rename] [--build-cache]")
         sys.exit(1)
 
     dat_input = sys.argv[1]
