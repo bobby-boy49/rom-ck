@@ -26,10 +26,12 @@ Here are some dat [files](https://files.catbox.moe/a0nmpf.zip).
 * **Ghost Dump Identification:** Automatically flags corrupt, broken, or fake "ghost" dumps whose contents consist entirely of empty null zeroes.
 
 ### 🎛️ Automation, Filtering & Safety Actions
+* **Interactive Name Normalization (`--rename`):** Normalizes chaotic loose file or archive names into structurally unified naming topologies verified directly by your DAT source material, cleanly bypassing string mutation bugs on complex layouts.
+* **Proactive Collision Tracking:** Surfaces potential target disk conflicts on-the-fly during the parallel verification scan, printing real-time console warnings if a normalized file target name already exists.
 * **Tailored System Reporting:** Automatically outputs a comprehensive `rom_verification_report.txt` breaking down good, bad, and unmapped variants with explicit audit summaries.
 * **Console Filtering Switches:** Tweak terminal noise by instructing the engine to print and log only verified dumps (`--only-good`) or bad/unknown entries (`--only-bad`).
 * **Destructive Clean-up Protections:** Includes strict switches to wipe empty dummy files (`--delete-null`) or completely clear out invalid dumps (`--purge`).
-* **Interactive Guardrail:** Destructive disk processes require an explicit, un-bypassable terminal confirmation: `"Yes, do as I say!"`.
+* **Interactive Guardrail:** Modifying or destructive disk processes (renaming or deletion) require an explicit, un-bypassable terminal confirmation: `"Yes, do as I say!"`.
 
 ---
 
@@ -45,6 +47,7 @@ Here are some dat [files](https://files.catbox.moe/a0nmpf.zip).
 | `--only-bad` | Filters console logging and reporting outputs to exclusively show broken/unmapped dumps. |
 | `--delete-null` | Targets and queues entirely zeroed-out "ghost" dumps for local filesystem deletion. |
 | `--purge` | Queues all unmapped, bad, or corrupt files for total filesystem deletion. |
+| `--rename` | Normalization Mode. Matches files against DAT targets and queues safe name corrections for disk modification. |
 | `--build-cache` | Standalone flag. Builds the SQLite database cache from your DAT files and exits immediately without running an audit. |
 
 PS. If you don't like AI you don't have to use it. Or read the slop above. But the reason I conjured this up is because I, for one was bored and number two, I wanted someting that I could just throw some dat files and some roms at and be done with it. If I had to be honest I am not proud of it either. But I wanted something that works and works relatively well and just did what I wanted it to do. And that's what this is!
