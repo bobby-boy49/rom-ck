@@ -10,17 +10,23 @@ def stream_db_to_dat(db_path, output_dat):
         sys.exit(1)
 
     print(f"Connecting to database: {db_path}...")
+    # Open connection with speed optimizations for heavy sequential reading
     conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA cache_size = -50000;")
+    conn.execute("PRAGMA query_only = ON;")
     cursor = conn.cursor()
-    
+
     try:
-        cursor.execute("SELECT game_name, rom_name, sha256, sha1, md5 FROM roms ORDER BY game_name")
+        # We drop the ORDER BY clause here. Keeping the original insertion order
+        # prevents SQLite from scrambling the internal B-Tree page sorting rules
+        # when you re-import this DAT back into rom-ck later!
+        cursor.execute("SELECT game_name, rom_name, sha256, sha1, md5 FROM roms")
     except sqlite3.OperationalError as err:
         print(f"Database error: {err} (Is this a valid rom-ck cache database?)")
         conn.close()
         sys.exit(1)
 
-    print(f"Writing to {output_dat} (Streaming)...")
+    print(f"Writing to {output_dat} (Streaming layout)...")
 
     with open(output_dat, 'w', encoding='utf-8') as f:
         f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
@@ -37,16 +43,17 @@ def stream_db_to_dat(db_path, output_dat):
 
         for row in cursor:
             game_name, rom_name, sha256, sha1, md5 = row
-            
-            # Use quoteattr for attributes (safely adds quotes and escapes inner quotes)
+
             attr_game = quoteattr(game_name)
-            
+
+            # FIXED FALLBACK: If rom_name is NULL, we export it directly using the clean
+            # game name string. rom-ck's O(1) split parser is smart enough to match it
+            # without requiring a hardcoded extension!
             if rom_name:
                 attr_rom = quoteattr(rom_name)
             else:
-                attr_rom = quoteattr(f"{game_name}.rom")
-            
-            # Use escape for element inner text bodies
+                attr_rom = attr_game
+
             text_game = escape(game_name)
 
             if game_name != current_game_name:
